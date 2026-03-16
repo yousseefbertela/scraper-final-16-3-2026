@@ -1,0 +1,166 @@
+"""
+Notes writer — persists scraped parts data to a structured JSON file.
+
+File is written atomically (write to .tmp, then os.replace) after every
+subgroup so data is never lost even if the process is killed mid-run.
+
+JSON structure:
+{
+  "meta": {
+    "created_at": "...",
+    "last_updated": "...",
+    "version": "1.0"
+  },
+  "data": {
+    "<series_value>": {
+      "series_label": "3' E90 (2004 — 2023)",
+      "models": {
+        "<type_code_full>": {
+          "series_value": "E90",
+          "series_label": "...",
+          "body": "Lim",
+          "model": "320i",
+          "market": "EUR",
+          "prod_month": "200806",
+          "engine": "N43",
+          "steering": "Left hand drive",
+          "type_code_full": "PF12-EUR-06-2008-E90-BMW-320i",
+          "groups": {
+            "<mg>": {
+              "group_name": "ENGINE",
+              "subgroups": {
+                "<diagId>": {
+                  "subgroup_name": "SHORT ENGINE",
+                  "diagram_image_url": "https://...",
+                  "scraped_at": "...",
+                  "parts": [ { ... } ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+import json
+import os
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class NotesWriter:
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self._tmp = filepath + ".tmp"
+        self.data = self._load()
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                           #
+    # ------------------------------------------------------------------ #
+
+    def save_subgroup(
+        self,
+        car: dict,
+        group: dict,
+        subgroup: dict,
+        diagram_url: str,
+        parts: list,
+    ):
+        """
+        Merge one subgroup's data into the in-memory tree, then flush to disk.
+        Called after every subgroup is scraped.
+
+        car      — dict with keys: series_value, series_label, body, model,
+                   market, prod_month, engine, steering, type_code_full
+        group    — dict with keys: mg, name
+        subgroup — dict with keys: diagId, name
+        """
+        series_key = car["series_value"]
+        type_key   = car["type_code_full"]
+        mg_key     = group["mg"]
+        diag_key   = subgroup["diagId"]
+
+        # Ensure series node
+        if series_key not in self.data["data"]:
+            self.data["data"][series_key] = {
+                "series_label": car["series_label"],
+                "models": {},
+            }
+
+        series_node = self.data["data"][series_key]
+
+        # Ensure model node
+        if type_key not in series_node["models"]:
+            series_node["models"][type_key] = {
+                "series_value":  car["series_value"],
+                "series_label":  car["series_label"],
+                "body":          car["body"],
+                "model":         car["model"],
+                "market":        car["market"],
+                "prod_month":    car["prod_month"],
+                "engine":        car["engine"],
+                "steering":      car["steering"],
+                "type_code_full": car["type_code_full"],
+                "groups": {},
+            }
+
+        model_node = series_node["models"][type_key]
+
+        # Ensure group node
+        if mg_key not in model_node["groups"]:
+            model_node["groups"][mg_key] = {
+                "group_name": group["name"],
+                "subgroups": {},
+            }
+
+        group_node = model_node["groups"][mg_key]
+
+        # Write / overwrite subgroup node
+        group_node["subgroups"][diag_key] = {
+            "subgroup_name":    subgroup["name"],
+            "diagram_image_url": diagram_url,
+            "scraped_at":       datetime.utcnow().isoformat(),
+            "parts":            parts,
+        }
+
+        self._atomic_write()
+        logger.debug(
+            f"Saved subgroup {diag_key} ({len(parts)} parts) "
+            f"for {type_key} / group {mg_key}"
+        )
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _load(self) -> dict:
+        if os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                logger.info(f"Loaded existing notes from {self.filepath}")
+                return data
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Could not load notes ({e}), starting fresh.")
+        return {
+            "meta": {
+                "created_at": datetime.utcnow().isoformat(),
+                "last_updated": None,
+                "version": "1.0",
+            },
+            "data": {},
+        }
+
+    def _atomic_write(self):
+        self.data["meta"]["last_updated"] = datetime.utcnow().isoformat()
+        try:
+            with open(self._tmp, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+            os.replace(self._tmp, self.filepath)
+        except OSError as e:
+            logger.error(f"Failed to write notes: {e}")

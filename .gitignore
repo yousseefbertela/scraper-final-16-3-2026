@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Debug / temp files
+data/debug*.html
+data/debug*.txt
+data/page_*.html
+data/scraper.log
+
+# Playwright browsers (installed separately)
+playwright/
+
+# IDE
+.vscode/
+.idea/
+
+# Temp scripts
+python
