@@ -16,6 +16,11 @@ data/debug*.txt
 data/page_*.html
 data/scraper.log
 
+# Data files — managed by PostgreSQL, never commit
+# (Railway always restores from DB on startup)
+data/*.json
+data/*.csv
+
 # Playwright browsers (installed separately)
 playwright/
 

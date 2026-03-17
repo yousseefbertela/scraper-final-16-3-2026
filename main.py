@@ -33,17 +33,25 @@ def setup_logging():
 
 
 def restore_files_from_db():
-    """On startup, pull files from PostgreSQL if local copies are missing."""
+    """On startup, ALWAYS pull latest files from PostgreSQL.
+
+    This ensures Railway always uses the most up-to-date scraping state
+    from the database — not a potentially stale version committed to git.
+    If PostgreSQL has no record for a file, the local/fresh copy is kept.
+    """
     try:
         from storage.db import restore_file_to_path
         for filepath in (VFINAL_NOTES_FILE, CHECKPOINT_FILE, PROGRESS_FILE):
-            if not Path(filepath).exists():
-                filename = Path(filepath).name
-                ok = restore_file_to_path(filename, filepath)
-                if ok:
-                    logging.getLogger("main").info(
-                        f"Restored {filepath} from DB"
-                    )
+            filename = Path(filepath).name
+            ok = restore_file_to_path(filename, filepath)
+            if ok:
+                logging.getLogger("main").info(
+                    f"Restored latest {filepath} from DB"
+                )
+            else:
+                logging.getLogger("main").info(
+                    f"No DB backup for {filename} — starting fresh"
+                )
     except Exception as e:
         logging.getLogger("main").warning(f"DB restore skipped ({e})")
 
