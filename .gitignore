@@ -25,3 +25,6 @@ playwright/
 
 # Temp scripts
 python
+
+# Environment secrets — never commit!
+.env

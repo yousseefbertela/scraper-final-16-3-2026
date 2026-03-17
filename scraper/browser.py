@@ -7,6 +7,12 @@ Launches a headed (visible) Chrome browser using Playwright with:
   - Human-like helper functions (delays, mouse movement, scrolling)
   - Cloudflare challenge detection and waiting
   - Safe page navigation with retry logic
+
+Virtual display (Xvfb):
+  - start_virtual_display() / stop_virtual_display() wrap pyvirtualdisplay
+  - On Linux servers (e.g. Railway) this creates an invisible Xvfb screen so
+    the headed browser can run without a physical display
+  - On Windows / Mac the functions are silent no-ops
 """
 
 import random
@@ -24,6 +30,46 @@ _USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Module-level virtual display handle
+_virtual_display = None
+
+
+# ------------------------------------------------------------------ #
+# Virtual display (Xvfb) — Linux only                                #
+# ------------------------------------------------------------------ #
+
+def start_virtual_display():
+    """
+    Start an Xvfb virtual display so a headed browser can run on a headless
+    Linux server (e.g. Railway).  Silent no-op on Windows / Mac or if
+    pyvirtualdisplay is not installed.
+    """
+    global _virtual_display
+    try:
+        from pyvirtualdisplay import Display
+        _virtual_display = Display(visible=False, size=(1920, 1080))
+        _virtual_display.start()
+        logger.info("Xvfb virtual display started (1920x1080)")
+    except Exception as e:
+        logger.info(f"Virtual display not started ({e}) — continuing without it")
+        _virtual_display = None
+
+
+def stop_virtual_display():
+    """Stop the virtual display if one was started."""
+    global _virtual_display
+    if _virtual_display is not None:
+        try:
+            _virtual_display.stop()
+            logger.info("Virtual display stopped")
+        except Exception:
+            pass
+        _virtual_display = None
+
+
+# ------------------------------------------------------------------ #
+# Browser launch                                                      #
+# ------------------------------------------------------------------ #
 
 def launch_browser(playwright_instance) -> tuple:
     """
@@ -85,10 +131,8 @@ def human_move_and_click(page: Page, selector: str):
     element = page.locator(selector).first
     box = element.bounding_box()
     if box:
-        # Add small random offset within the element bounds
         x = box["x"] + box["width"] * random.uniform(0.2, 0.8)
         y = box["y"] + box["height"] * random.uniform(0.2, 0.8)
-        # Move to a point near (but not on) the element first
         page.mouse.move(x + random.randint(-50, 50), y + random.randint(-30, 30))
         time.sleep(random.uniform(0.1, 0.3))
         page.mouse.move(x, y)
@@ -131,13 +175,12 @@ def wait_for_no_cloudflare(page: Page, timeout: int = 60):
     while True:
         title = page.title()
         if "just a moment" not in title.lower():
-            # Also check for Cloudflare challenge iframe
             cf_frames = [
                 f for f in page.frames
                 if "challenges.cloudflare.com" in f.url
             ]
             if not cf_frames:
-                return  # Challenge cleared
+                return
         elapsed = time.time() - start
         if elapsed > timeout:
             raise TimeoutError(
@@ -148,8 +191,6 @@ def wait_for_no_cloudflare(page: Page, timeout: int = 60):
             f"Cloudflare challenge active, waiting... ({elapsed:.0f}s elapsed)"
         )
         time.sleep(2)
-
-
 
 
 # ------------------------------------------------------------------ #
@@ -185,6 +226,7 @@ def dismiss_popups(page):
         except Exception:
             pass
 
+
 # ------------------------------------------------------------------ #
 # Safe navigation                                                      #
 # ------------------------------------------------------------------ #
@@ -202,11 +244,10 @@ def safe_goto(page: Page, url: str, retries: int = 3):
         try:
             logger.debug(f"Navigating to {url} (attempt {attempt})")
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            # networkidle is optional - ad-heavy pages never reach it
             try:
                 page.wait_for_load_state("networkidle", timeout=4_000)
             except Exception:
-                pass  # Fine - DOM is ready, ads just keep loading
+                pass
             wait_for_no_cloudflare(page)
             dismiss_popups(page)
             human_delay(PAGE_LOAD_DELAY)

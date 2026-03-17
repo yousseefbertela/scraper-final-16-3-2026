@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-16T22:58:10.627595",
+  "last_updated": "2026-03-17T13:01:57.469166",
   "cars": {
     "VA99-EGY-05-2005-E90-BMW-320i": {
       "completed": true,
@@ -44,6 +44,11 @@
         "91"
       ],
       "in_progress_group": null
+    },
+    "VG99-EGY-09-2007-E90-BMW-320i": {
+      "completed": false,
+      "completed_groups": [],
+      "in_progress_group": "01"
     }
   }
 }

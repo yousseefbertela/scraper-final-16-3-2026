@@ -133,12 +133,17 @@ def scrape_parts_table(page, type_code_full, diag_id):
     return parts
 
 def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
+    """
+    Scrape all groups/subgroups/parts for a single car.
+    Returns total parts count (int).
+    """
     type_code = car["type_code_full"]
     logger.info(f"Starting parts scrape for {type_code}")
     groups = get_main_groups(page, type_code)
     if not groups:
         logger.warning(f"No groups found for {type_code}")
-        return
+        return 0
+    total_parts = 0
     for group in groups:
         mg = group["mg"]
         if checkpoint_manager.is_group_done(type_code, mg):
@@ -163,8 +168,10 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
                 parts = []
                 diagram_url = ""
             notes_writer.save_subgroup(car, group, subgroup, diagram_url, parts)
+            total_parts += len(parts)
             logger.info(f"  Saved {len(parts)} parts for {diag_id}")
         checkpoint_manager.mark_group_done(car, mg)
         human_delay(GROUP_DELAY)
     checkpoint_manager.mark_car_done(car)
-    logger.info(f"Completed: {type_code}")
+    logger.info(f"Completed: {type_code} — {total_parts} total parts")
+    return total_parts

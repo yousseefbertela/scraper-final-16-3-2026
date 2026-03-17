@@ -4,6 +4,10 @@ Notes writer — persists scraped parts data to a structured JSON file.
 File is written atomically (write to .tmp, then os.replace) after every
 subgroup so data is never lost even if the process is killed mid-run.
 
+After every atomic write the file is also mirrored to PostgreSQL via
+storage.db.sync_file_from_path (non-blocking; silently ignored if DB is
+unavailable).
+
 JSON structure:
 {
   "meta": {
@@ -20,11 +24,11 @@ JSON structure:
           "series_label": "...",
           "body": "Lim",
           "model": "320i",
-          "market": "EUR",
-          "prod_month": "200806",
-          "engine": "N43",
+          "market": "EGY",
+          "prod_month": "200805",
+          "engine": "N46",
           "steering": "Left hand drive",
-          "type_code_full": "PF12-EUR-06-2008-E90-BMW-320i",
+          "type_code_full": "VA99-EGY-05-2005-E90-BMW-320i",
           "groups": {
             "<mg>": {
               "group_name": "ENGINE",
@@ -164,3 +168,10 @@ class NotesWriter:
             os.replace(self._tmp, self.filepath)
         except OSError as e:
             logger.error(f"Failed to write notes: {e}")
+            return
+        # Sync to DB (non-blocking — silently skip if DB unavailable)
+        try:
+            from storage.db import sync_file_from_path
+            sync_file_from_path(self.filepath)
+        except Exception:
+            pass

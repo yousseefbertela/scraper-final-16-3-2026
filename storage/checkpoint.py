@@ -7,10 +7,10 @@ Checkpoint file structure (JSON):
 {
   "last_updated": "2026-03-16T10:30:00",
   "cars": {
-    "PF12-EUR-06-2008-E90-BMW-320i": {
-      "completed": false,
-      "completed_groups": ["11", "12"],
-      "in_progress_group": "13"
+    "VA99-EGY-05-2005-E90-BMW-320i": {
+      "completed": true,
+      "completed_groups": ["01", "02", ...],
+      "in_progress_group": null
     }
   }
 }
@@ -71,6 +71,14 @@ class CheckpointManager:
         self._save()
         logger.info(f"Checkpoint: car done — {key}")
 
+    def get_done_prefixes(self) -> set:
+        """Return 4-char type-code prefixes for all completed cars."""
+        return {
+            tc[:4]
+            for tc, entry in self.data["cars"].items()
+            if entry.get("completed") and len(tc) >= 4
+        }
+
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
     # ------------------------------------------------------------------ #
@@ -102,3 +110,10 @@ class CheckpointManager:
             os.replace(self._tmp, self.filepath)
         except OSError as e:
             logger.error(f"Failed to save checkpoint: {e}")
+            return
+        # Sync to DB (non-blocking)
+        try:
+            from storage.db import sync_file_from_path
+            sync_file_from_path(self.filepath)
+        except Exception:
+            pass

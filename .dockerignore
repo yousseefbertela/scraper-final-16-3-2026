@@ -1,0 +1,14 @@
+# Don't copy these into the Docker image
+.git
+.gitignore
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+data/debug*.html
+data/debug*.txt
+data/page_*.html
+data/scraper.log
+.vscode/
+.idea/
