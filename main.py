@@ -1,5 +1,6 @@
 
 import argparse
+import gc
 import logging
 import sys
 from pathlib import Path
@@ -13,6 +14,9 @@ from scraper.parts_scraper import scrape_car_parts
 from storage.notes import NotesWriter
 from storage.checkpoint import CheckpointManager
 from storage.progress import ProgressWriter
+
+# Restart browser every N cars to reset memory (~2-3 GB baseline after restart)
+BROWSER_RESTART_EVERY = 10
 
 
 def setup_logging():
@@ -41,9 +45,7 @@ def restore_files_from_db():
                         f"Restored {filepath} from DB"
                     )
     except Exception as e:
-        logging.getLogger("main").warning(
-            f"DB restore skipped ({e})"
-        )
+        logging.getLogger("main").warning(f"DB restore skipped ({e})")
 
 
 def main():
@@ -63,7 +65,7 @@ def main():
     mode_str = "SAMPLE (E90 320i EGY)" if sample_mode else "FULL (all EGY series)"
     logger.info(f"=== RealOEM BMW Scraper starting — mode: {mode_str} ===")
 
-    # --- Initialise DB (create table if needed) ---
+    # --- Initialise DB ---
     try:
         from storage.db import ensure_table
         ensure_table()
@@ -78,52 +80,92 @@ def main():
     checkpoint = CheckpointManager(CHECKPOINT_FILE)
     progress   = ProgressWriter(PROGRESS_FILE)
 
-    # --- Compute already-scraped prefixes (4-char dedup) ---
-    scraped_prefixes = checkpoint.get_done_prefixes() | progress.get_scraped_prefixes()
-    logger.info(f"Known scraped prefixes: {len(scraped_prefixes)}")
-
     # --- Start virtual display for headed browser on Linux ---
     start_virtual_display()
 
-    with sync_playwright() as p:
-        browser, context, page = launch_browser(p)
+    session = 0
 
-        try:
-            car_gen = build_car_list(
-                page,
-                sample_mode=sample_mode,
-                scraped_prefixes=scraped_prefixes,
+    try:
+        while True:
+            session += 1
+
+            # Recompute scraped prefixes at the start of every browser session
+            # so completed cars from the previous session are always skipped
+            scraped_prefixes = (
+                checkpoint.get_done_prefixes() | progress.get_scraped_prefixes()
+            )
+            logger.info(
+                f"Browser session {session} — "
+                f"known prefixes: {len(scraped_prefixes)}"
             )
 
-            for car in car_gen:
-                type_code = car["type_code_full"]
+            need_restart   = False  # True = hit 10-car limit, loop again
+            interrupted    = False
 
-                if checkpoint.is_car_done(type_code):
-                    logger.info(f"Skipping (checkpoint done): {type_code}")
-                    continue
-
-                logger.info(f"=== Scraping car: {type_code} ===")
-                progress.mark_started(type_code)
+            with sync_playwright() as p:
+                browser, context, page = launch_browser(p)
+                cars_this_session = 0
 
                 try:
-                    parts_count = scrape_car_parts(page, car, notes, checkpoint)
-                    progress.mark_completed(type_code, parts_count)
-                    logger.info(
-                        f"Finished {type_code}: {parts_count} parts"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to scrape {type_code}: {e}", exc_info=True
+                    car_gen = build_car_list(
+                        page,
+                        sample_mode=sample_mode,
+                        scraped_prefixes=scraped_prefixes,
                     )
 
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user. Progress saved.")
-        finally:
-            browser.close()
-            logger.info("Browser closed.")
+                    for car in car_gen:
+                        type_code = car["type_code_full"]
 
-    stop_virtual_display()
-    logger.info("=== Scraper done ===")
+                        if checkpoint.is_car_done(type_code):
+                            logger.info(f"Skipping (checkpoint done): {type_code}")
+                            continue
+
+                        logger.info(f"=== Scraping car: {type_code} ===")
+                        progress.mark_started(type_code)
+
+                        try:
+                            parts_count = scrape_car_parts(
+                                page, car, notes, checkpoint
+                            )
+                            progress.mark_completed(type_code, parts_count)
+                            logger.info(f"Finished {type_code}: {parts_count} parts")
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to scrape {type_code}: {e}", exc_info=True
+                            )
+
+                        cars_this_session += 1
+
+                        if cars_this_session >= BROWSER_RESTART_EVERY:
+                            need_restart = True
+                            logger.info(
+                                f"Scraped {BROWSER_RESTART_EVERY} cars — "
+                                f"restarting browser to clear memory"
+                            )
+                            break
+
+                except KeyboardInterrupt:
+                    interrupted = True
+                    logger.info("Interrupted by user. Progress saved.")
+
+                finally:
+                    try:
+                        browser.close()
+                        logger.info("Browser closed.")
+                    except Exception:
+                        pass
+
+            # Clear Python memory after every browser session
+            gc.collect()
+            logger.info("Memory cleared.")
+
+            if interrupted or not need_restart:
+                # Either user stopped it, or generator exhausted = all cars done
+                break
+
+    finally:
+        stop_virtual_display()
+        logger.info("=== Scraper done ===")
 
 
 if __name__ == "__main__":
