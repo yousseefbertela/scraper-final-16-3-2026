@@ -12,11 +12,11 @@ SELECT_URL = f"{BASE_URL}/bmw/enUS/select"
 # --- Browser ---
 HEADLESS = False          # Always headed; Xvfb virtual display used on Linux servers
 
-# --- Human-like delay ranges (tuned to ~80/1000 safe speed) ---
-PAGE_LOAD_DELAY  = (1.0, 1.5)   # After each page navigation
-ACTION_DELAY     = (0.3, 0.6)   # Between small UI actions
-GROUP_DELAY      = (1.0, 1.5)   # Between main groups
-SUBGROUP_DELAY   = (0.5, 1.0)   # Between subgroups
+# --- Human-like delay ranges (tuned to ~100/1000 safe speed) ---
+PAGE_LOAD_DELAY  = (0.3, 0.5)   # After each page navigation
+ACTION_DELAY     = (0.1, 0.15)  # Between small UI actions
+GROUP_DELAY      = (0.3, 0.5)   # Between main groups
+SUBGROUP_DELAY   = (0.1, 0.2)   # Between subgroups
 RETRY_DELAY      = (8,  20)     # On error / rate-limit
 
 MAX_RETRIES = 3
