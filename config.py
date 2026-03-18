@@ -27,7 +27,6 @@ EGY_ONLY = True           # Only scrape EGY market; skip all others
 # --- Output paths ---
 DATA_DIR             = "data"
 VFINAL_NOTES_FILE    = "data/vFinal_notes.json"
-EGY_CARS_CACHE_FILE  = "data/egy_cars_cache.json"   # Full EGY car list (discovery cache)
 CHECKPOINT_FILE      = "data/checkpoint.json"
 LOG_FILE             = "data/scraper.log"
 PROGRESS_FILE        = "data/scraped_progress.csv"
