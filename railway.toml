@@ -1,3 +1,4 @@
 [deploy]
 startCommand = "python main.py"
-restartPolicyType = "NEVER"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

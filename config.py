@@ -12,11 +12,11 @@ SELECT_URL = f"{BASE_URL}/bmw/enUS/select"
 # --- Browser ---
 HEADLESS = False          # Always headed; Xvfb virtual display used on Linux servers
 
-# --- Human-like delay ranges (tuned to ~100/1000 safe speed) ---
-PAGE_LOAD_DELAY  = (0.3, 0.5)   # After each page navigation
-ACTION_DELAY     = (0.1, 0.15)  # Between small UI actions
-GROUP_DELAY      = (0.3, 0.5)   # Between main groups
-SUBGROUP_DELAY   = (0.1, 0.2)   # Between subgroups
+# --- Human-like delay ranges (tuned to ~80/1000 safe speed) ---
+PAGE_LOAD_DELAY  = (1.0, 1.5)   # After each page navigation
+ACTION_DELAY     = (0.3, 0.6)   # Between small UI actions
+GROUP_DELAY      = (1.0, 1.5)   # Between main groups
+SUBGROUP_DELAY   = (0.5, 1.0)   # Between subgroups
 RETRY_DELAY      = (8,  20)     # On error / rate-limit
 
 MAX_RETRIES = 3
@@ -25,11 +25,12 @@ MAX_RETRIES = 3
 EGY_ONLY = True           # Only scrape EGY market; skip all others
 
 # --- Output paths ---
-DATA_DIR          = "data"
-VFINAL_NOTES_FILE = "data/vFinal_notes.json"
-CHECKPOINT_FILE   = "data/checkpoint.json"
-LOG_FILE          = "data/scraper.log"
-PROGRESS_FILE     = "data/scraped_progress.csv"
+DATA_DIR             = "data"
+VFINAL_NOTES_FILE    = "data/vFinal_notes.json"
+EGY_CARS_CACHE_FILE  = "data/egy_cars_cache.json"   # Full EGY car list (discovery cache)
+CHECKPOINT_FILE      = "data/checkpoint.json"
+LOG_FILE             = "data/scraper.log"
+PROGRESS_FILE        = "data/scraped_progress.csv"
 
 # --- PostgreSQL (file-mirror storage) ---
 DATABASE_URL = os.getenv(
