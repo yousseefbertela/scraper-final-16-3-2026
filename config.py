@@ -30,6 +30,7 @@ VFINAL_NOTES_FILE    = "data/vFinal_notes.json"
 CHECKPOINT_FILE      = "data/checkpoint.json"
 LOG_FILE             = "data/scraper.log"
 PROGRESS_FILE        = "data/scraped_progress.csv"
+CAR_LIST_CACHE_FILE  = "data/car_list.json"
 
 # --- PostgreSQL (file-mirror storage) ---
 DATABASE_URL = os.getenv(

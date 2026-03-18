@@ -2,7 +2,7 @@
 import re, logging
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
-from scraper.browser import safe_goto, human_delay, human_scroll
+from scraper.browser import safe_goto, human_delay, human_scroll, BrowserCrashError
 from config import BASE_URL, SUBGROUP_DELAY, GROUP_DELAY
 logger = logging.getLogger(__name__)
 PARTGRP_URL   = BASE_URL + "/bmw/enUS/partgrp"
@@ -136,6 +136,7 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
     """
     Scrape all groups/subgroups/parts for a single car.
     Returns total parts count (int).
+    Raises BrowserCrashError if the browser dies mid-scrape (caller restarts).
     """
     type_code = car["type_code_full"]
     logger.info(f"Starting parts scrape for {type_code}")
@@ -153,25 +154,37 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
         checkpoint_manager.set_in_progress(car, mg)
         try:
             subgroups = get_subgroups(page, type_code, mg)
+        except BrowserCrashError:
+            raise
         except Exception as e:
             logger.error(f"Error getting subgroups for group {mg}: {e}")
             subgroups = []
         for subgroup in subgroups:
             diag_id = subgroup["diagId"]
+            # Skip subgroups already successfully scraped (subgroup-level checkpoint)
+            if checkpoint_manager.is_subgroup_done(type_code, mg, diag_id):
+                logger.info(
+                    "  Skipping (already done): subgroup %s - %s",
+                    diag_id, subgroup["name"]
+                )
+                continue
             logger.info("  Subgroup %s: %s", diag_id, subgroup["name"])
             human_delay(SUBGROUP_DELAY)
             try:
                 parts = scrape_parts_table(page, type_code, diag_id)
                 diagram_url = get_diagram_image_url(page, type_code, diag_id)
+            except BrowserCrashError:
+                raise  # propagate up to main.py for browser restart
             except Exception as e:
                 logger.error(f"  Error scraping subgroup {diag_id}: {e}")
                 parts = []
                 diagram_url = ""
             notes_writer.save_subgroup(car, group, subgroup, diagram_url, parts)
+            checkpoint_manager.mark_subgroup_done(car, mg, diag_id)
             total_parts += len(parts)
             logger.info(f"  Saved {len(parts)} parts for {diag_id}")
         checkpoint_manager.mark_group_done(car, mg)
         human_delay(GROUP_DELAY)
     checkpoint_manager.mark_car_done(car)
-    logger.info(f"Completed: {type_code} — {total_parts} total parts")
+    logger.info(f"Completed: {type_code} - {total_parts} total parts")
     return total_parts

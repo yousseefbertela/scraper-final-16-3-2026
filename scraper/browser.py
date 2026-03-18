@@ -1,18 +1,5 @@
 """
 Browser setup with anti-detection measures.
-
-Launches a headed (visible) Chrome browser using Playwright with:
-  - playwright-stealth to mask automation signals
-  - Realistic user-agent and viewport
-  - Human-like helper functions (delays, mouse movement, scrolling)
-  - Cloudflare challenge detection and waiting
-  - Safe page navigation with retry logic
-
-Virtual display (Xvfb):
-  - start_virtual_display() / stop_virtual_display() wrap pyvirtualdisplay
-  - On Linux servers (e.g. Railway) this creates an invisible Xvfb screen so
-    the headed browser can run without a physical display
-  - On Windows / Mac the functions are silent no-ops
 """
 
 import random
@@ -23,27 +10,27 @@ from playwright_stealth import Stealth as _PlaywrightStealth
 
 logger = logging.getLogger(__name__)
 
-# Realistic Windows Chrome user-agent
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
-# Module-level virtual display handle
 _virtual_display = None
 
 
+class BrowserCrashError(RuntimeError):
+    """Raised when the Chromium renderer crashes (OOM or process kill).
+    Signals main.py to close and reopen the browser then resume from checkpoint.
+    """
+    pass
+
+
 # ------------------------------------------------------------------ #
-# Virtual display (Xvfb) — Linux only                                #
+# Virtual display (Xvfb) - Linux only                                #
 # ------------------------------------------------------------------ #
 
 def start_virtual_display():
-    """
-    Start an Xvfb virtual display so a headed browser can run on a headless
-    Linux server (e.g. Railway).  Silent no-op on Windows / Mac or if
-    pyvirtualdisplay is not installed.
-    """
     global _virtual_display
     try:
         from pyvirtualdisplay import Display
@@ -51,12 +38,11 @@ def start_virtual_display():
         _virtual_display.start()
         logger.info("Xvfb virtual display started (1920x1080)")
     except Exception as e:
-        logger.info(f"Virtual display not started ({e}) — continuing without it")
+        logger.info(f"Virtual display not started ({e}) - continuing without it")
         _virtual_display = None
 
 
 def stop_virtual_display():
-    """Stop the virtual display if one was started."""
     global _virtual_display
     if _virtual_display is not None:
         try:
@@ -72,10 +58,6 @@ def stop_virtual_display():
 # ------------------------------------------------------------------ #
 
 def launch_browser(playwright_instance) -> tuple:
-    """
-    Launch a headed Chrome browser with stealth settings.
-    Returns (browser, context, page).
-    """
     browser: Browser = playwright_instance.chromium.launch(
         headless=False,
         args=[
@@ -87,7 +69,6 @@ def launch_browser(playwright_instance) -> tuple:
             "--start-maximized",
         ],
     )
-
     context: BrowserContext = browser.new_context(
         viewport={"width": 1920, "height": 1080},
         user_agent=_USER_AGENT,
@@ -103,30 +84,23 @@ def launch_browser(playwright_instance) -> tuple:
             ),
         },
     )
-
     page: Page = context.new_page()
     _PlaywrightStealth().apply_stealth_sync(page)
-
     logger.info("Browser launched (headed Chrome + stealth)")
     return browser, context, page
 
 
 # ------------------------------------------------------------------ #
-# Human-like helpers                                                   #
+# Human-like helpers                                                  #
 # ------------------------------------------------------------------ #
 
 def human_delay(range_tuple: tuple):
-    """Sleep a random number of seconds within range_tuple=(min, max)."""
     duration = random.uniform(*range_tuple)
     logger.debug(f"Sleeping {duration:.1f}s")
     time.sleep(duration)
 
 
 def human_move_and_click(page: Page, selector: str):
-    """
-    Locate an element, move the mouse toward it with a slight random offset,
-    pause briefly, then click. Simulates natural human mouse movement.
-    """
     from config import ACTION_DELAY
     element = page.locator(selector).first
     box = element.bounding_box()
@@ -144,9 +118,6 @@ def human_move_and_click(page: Page, selector: str):
 
 
 def human_select(page: Page, selector: str, value: str):
-    """
-    Focus a <select> element, wait briefly, select by value, wait again.
-    """
     from config import ACTION_DELAY
     element = page.locator(selector).first
     element.focus()
@@ -156,21 +127,16 @@ def human_select(page: Page, selector: str, value: str):
 
 
 def human_scroll(page: Page):
-    """Scroll down a random amount (200-600px) to simulate reading."""
     scroll_amount = random.randint(200, 600)
     page.mouse.wheel(0, scroll_amount)
     time.sleep(random.uniform(0.3, 0.8))
 
 
 # ------------------------------------------------------------------ #
-# Cloudflare handling                                                  #
+# Cloudflare handling                                                 #
 # ------------------------------------------------------------------ #
 
 def wait_for_no_cloudflare(page: Page, timeout: int = 60):
-    """
-    Wait until the Cloudflare 'Just a moment' challenge has cleared.
-    Polls every 2 seconds. Raises TimeoutError if timeout exceeded.
-    """
     start = time.time()
     while True:
         title = page.title()
@@ -184,8 +150,7 @@ def wait_for_no_cloudflare(page: Page, timeout: int = 60):
         elapsed = time.time() - start
         if elapsed > timeout:
             raise TimeoutError(
-                f"Cloudflare challenge did not clear within {timeout}s. "
-                "You may need to solve the CAPTCHA manually."
+                f"Cloudflare challenge did not clear within {timeout}s."
             )
         logger.warning(
             f"Cloudflare challenge active, waiting... ({elapsed:.0f}s elapsed)"
@@ -194,7 +159,7 @@ def wait_for_no_cloudflare(page: Page, timeout: int = 60):
 
 
 # ------------------------------------------------------------------ #
-# Ad / popup dismissal                                                 #
+# Ad / popup dismissal                                                #
 # ------------------------------------------------------------------ #
 
 _CLOSE_SELECTORS = [
@@ -210,7 +175,6 @@ _CLOSE_SELECTORS = [
 ]
 
 def dismiss_popups(page):
-    """Close any ad overlays or popups. Silent on failure."""
     try:
         page.keyboard.press("Escape")
         time.sleep(0.3)
@@ -228,14 +192,14 @@ def dismiss_popups(page):
 
 
 # ------------------------------------------------------------------ #
-# Safe navigation                                                      #
+# Safe navigation                                                     #
 # ------------------------------------------------------------------ #
 
 def safe_goto(page: Page, url: str, retries: int = 3):
     """
     Navigate to url with retry logic.
-    After load: waits for networkidle, checks for Cloudflare, applies human delay.
-    Raises RuntimeError after max retries.
+    Raises BrowserCrashError immediately if the page/renderer crashes.
+    Raises RuntimeError after max retries for other errors.
     """
     from config import PAGE_LOAD_DELAY, RETRY_DELAY, MAX_RETRIES
 
@@ -252,9 +216,16 @@ def safe_goto(page: Page, url: str, retries: int = 3):
             dismiss_popups(page)
             human_delay(PAGE_LOAD_DELAY)
             return
+        except BrowserCrashError:
+            raise
         except Exception as e:
+            err_str = str(e)
             logger.warning(f"Navigation error (attempt {attempt}): {e}")
-
+            # Crash detected - no point retrying on a dead renderer
+            if "crashed" in err_str.lower():
+                raise BrowserCrashError(
+                    f"Chromium renderer crashed navigating to {url}: {e}"
+                )
         if attempt < max_tries:
             logger.info(f"Retrying in {RETRY_DELAY[0]}-{RETRY_DELAY[1]}s ...")
             human_delay(RETRY_DELAY)

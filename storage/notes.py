@@ -1,5 +1,5 @@
 """
-Notes writer — persists scraped parts data to a structured JSON file.
+Notes writer - persists scraped parts data to a structured JSON file.
 
 File is written atomically (write to .tmp, then os.replace) after every
 subgroup so data is never lost even if the process is killed mid-run.
@@ -10,24 +10,15 @@ unavailable).
 
 JSON structure:
 {
-  "meta": {
-    "created_at": "...",
-    "last_updated": "...",
-    "version": "1.0"
-  },
+  "meta": { "created_at": "...", "last_updated": "...", "version": "1.0" },
   "data": {
     "<series_value>": {
-      "series_label": "3' E90 (2004 — 2023)",
+      "series_label": "3' E90 (2004 - 2023)",
       "models": {
         "<type_code_full>": {
-          "series_value": "E90",
-          "series_label": "...",
-          "body": "Lim",
-          "model": "320i",
-          "market": "EGY",
-          "prod_month": "200805",
-          "engine": "N46",
-          "steering": "Left hand drive",
+          "series_value": "E90", "series_label": "...", "body": "Lim",
+          "model": "320i", "market": "EGY", "prod_month": "200805",
+          "engine": "N46", "steering": "Left hand drive",
           "type_code_full": "VA99-EGY-05-2005-E90-BMW-320i",
           "groups": {
             "<mg>": {
@@ -67,29 +58,16 @@ class NotesWriter:
     # Public API                                                           #
     # ------------------------------------------------------------------ #
 
-    def save_subgroup(
-        self,
-        car: dict,
-        group: dict,
-        subgroup: dict,
-        diagram_url: str,
-        parts: list,
-    ):
+    def save_subgroup(self, car, group, subgroup, diagram_url, parts):
         """
         Merge one subgroup's data into the in-memory tree, then flush to disk.
         Called after every subgroup is scraped.
-
-        car      — dict with keys: series_value, series_label, body, model,
-                   market, prod_month, engine, steering, type_code_full
-        group    — dict with keys: mg, name
-        subgroup — dict with keys: diagId, name
         """
         series_key = car["series_value"]
         type_key   = car["type_code_full"]
         mg_key     = group["mg"]
         diag_key   = subgroup["diagId"]
 
-        # Ensure series node
         if series_key not in self.data["data"]:
             self.data["data"][series_key] = {
                 "series_label": car["series_label"],
@@ -98,24 +76,22 @@ class NotesWriter:
 
         series_node = self.data["data"][series_key]
 
-        # Ensure model node
         if type_key not in series_node["models"]:
             series_node["models"][type_key] = {
-                "series_value":  car["series_value"],
-                "series_label":  car["series_label"],
-                "body":          car["body"],
-                "model":         car["model"],
-                "market":        car["market"],
-                "prod_month":    car["prod_month"],
-                "engine":        car["engine"],
-                "steering":      car["steering"],
+                "series_value":   car["series_value"],
+                "series_label":   car["series_label"],
+                "body":           car["body"],
+                "model":          car["model"],
+                "market":         car["market"],
+                "prod_month":     car["prod_month"],
+                "engine":         car["engine"],
+                "steering":       car["steering"],
                 "type_code_full": car["type_code_full"],
                 "groups": {},
             }
 
         model_node = series_node["models"][type_key]
 
-        # Ensure group node
         if mg_key not in model_node["groups"]:
             model_node["groups"][mg_key] = {
                 "group_name": group["name"],
@@ -124,12 +100,11 @@ class NotesWriter:
 
         group_node = model_node["groups"][mg_key]
 
-        # Write / overwrite subgroup node
         group_node["subgroups"][diag_key] = {
-            "subgroup_name":    subgroup["name"],
+            "subgroup_name":     subgroup["name"],
             "diagram_image_url": diagram_url,
-            "scraped_at":       datetime.utcnow().isoformat(),
-            "parts":            parts,
+            "scraped_at":        datetime.utcnow().isoformat(),
+            "parts":             parts,
         }
 
         self._atomic_write()
@@ -137,6 +112,29 @@ class NotesWriter:
             f"Saved subgroup {diag_key} ({len(parts)} parts) "
             f"for {type_key} / group {mg_key}"
         )
+
+    def get_car_dict(self, type_code_full: str):
+        """
+        Extract a car metadata dict from already-saved notes data.
+        Used on startup to resume an in-progress car without re-enumerating
+        the RealOEM dropdowns.
+        Returns None if the car has not been saved to notes yet.
+        """
+        for series_data in self.data["data"].values():
+            model = series_data.get("models", {}).get(type_code_full)
+            if model:
+                return {
+                    "series_value":   model.get("series_value", ""),
+                    "series_label":   model.get("series_label", ""),
+                    "body":           model.get("body", ""),
+                    "model":          model.get("model", ""),
+                    "market":         model.get("market", "EGY"),
+                    "prod_month":     model.get("prod_month", ""),
+                    "engine":         model.get("engine", ""),
+                    "steering":       model.get("steering", ""),
+                    "type_code_full": type_code_full,
+                }
+        return None
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
@@ -169,7 +167,6 @@ class NotesWriter:
         except OSError as e:
             logger.error(f"Failed to write notes: {e}")
             return
-        # Sync to DB (non-blocking — silently skip if DB unavailable)
         try:
             from storage.db import sync_file_from_path
             sync_file_from_path(self.filepath)
