@@ -13,7 +13,9 @@ from config import (
     VFINAL_NOTES_FILE, CHECKPOINT_FILE, LOG_FILE,
     PROGRESS_FILE, DATA_DIR, CAR_LIST_CACHE_FILE,
 )
-from scraper.browser import launch_browser, start_virtual_display, stop_virtual_display, BrowserCrashError
+from scraper.browser import (
+    launch_browser, start_virtual_display, stop_virtual_display, BrowserCrashError
+)
 from scraper.car_selector import build_car_list
 from scraper.parts_scraper import scrape_car_parts
 from storage.notes import NotesWriter
@@ -53,39 +55,42 @@ def restore_files_from_db():
             if ok:
                 logging.getLogger("main").info(f"Restored {filename} from DB")
             else:
-                logging.getLogger("main").info(f"No DB backup for {filename} - starting fresh")
+                logging.getLogger("main").info(
+                    f"No DB backup for {filename} - starting fresh"
+                )
     except Exception as e:
         logging.getLogger("main").warning(f"DB restore skipped ({e})")
 
 
 def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
-                           notes: "NotesWriter", checkpoint: "CheckpointManager"):
+                           notes, checkpoint):
     """
-    Return an ordered list of car dicts to scrape this session.
+    Return (cars, needs_followup) for this browser session.
 
-    Phase 1 — Resume incomplete cars instantly (no dropdown navigation):
-        Check checkpoint for cars that are started but not completed.
-        Retrieve their metadata from notes.json (already saved there when
-        we scraped earlier groups).  This is instantaneous and avoids
-        re-navigating the RealOEM select dropdowns just to find where we left off.
+    needs_followup=True means Phase 1 was used — after processing these cars
+    the outer loop MUST restart to discover more cars via Phase 2.
 
-    Phase 2 — Discover remaining cars:
+    Phase 1 - Resume incomplete cars instantly (no dropdown navigation):
+        Find cars in checkpoint that are started but not completed.
+        Pull their metadata straight from notes.json.
+        Always sets needs_followup=True so Phase 2 runs next session.
+
+    Phase 2 - Discover remaining cars:
         Load from car_list.json cache if available, otherwise enumerate
-        RealOEM dropdowns and save the result to cache for future sessions.
-        Filters out any cars already done or handled in Phase 1.
+        RealOEM dropdowns and save the cache for future sessions.
+        needs_followup=False (list is exhaustive; loop exits when empty).
     """
     logger = logging.getLogger("main")
 
     # ── Phase 1: resume in-progress cars from notes.json metadata ──
-    # This lets us jump straight to the last car without any dropdown navigation.
     resume_cars = []
     if not sample_mode:
         for tc, entry in checkpoint.data.get("cars", {}).items():
             if entry.get("completed", False):
-                continue  # fully done
+                continue
             prefix = tc[:4]
             if prefix in scraped_prefixes:
-                continue  # already done this session
+                continue
             car_dict = notes.get_car_dict(tc)
             if car_dict:
                 resume_cars.append(car_dict)
@@ -100,9 +105,11 @@ def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
     if resume_cars:
         logger.info(
             f"Returning {len(resume_cars)} in-progress car(s) for immediate resume. "
-            f"RealOEM dropdown enumeration skipped."
+            f"RealOEM dropdown enumeration skipped. "
+            f"Will enumerate remaining cars in next session."
         )
-        return resume_cars
+        # needs_followup=True so the outer loop restarts and runs Phase 2 next
+        return resume_cars, True
 
     # ── Phase 2: discover next cars from cache or RealOEM ──
     cache_path = Path(CAR_LIST_CACHE_FILE)
@@ -121,23 +128,30 @@ def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
                 remaining.append(car)
             scraped_prefixes.update(seen)
             logger.info(
-                f"Car list loaded from cache: {len(remaining)} remaining "
+                f"Phase 2 cache: {len(remaining)} cars remaining "
                 f"of {len(all_cars)} total"
             )
-            return remaining
+            return remaining, False
         except Exception as e:
             logger.warning(f"Could not load car list cache ({e}), re-enumerating...")
 
-    # No cache — enumerate from RealOEM and save for future sessions
-    logger.info("Building full car list from RealOEM dropdowns (first time - will be cached)...")
-    all_cars = list(build_car_list(page, sample_mode=sample_mode, scraped_prefixes=set()))
+    # No cache - enumerate from RealOEM and save for future sessions
+    logger.info(
+        "Phase 2: building full car list from RealOEM dropdowns "
+        "(first time - will be cached for future restarts)..."
+    )
+    all_cars = list(build_car_list(
+        page, sample_mode=sample_mode, scraped_prefixes=set()
+    ))
 
     if not sample_mode:
         try:
             Path(DATA_DIR).mkdir(exist_ok=True)
             with open(str(cache_path), "w", encoding="utf-8") as f:
                 json.dump(all_cars, f, indent=2, ensure_ascii=False)
-            logger.info(f"Car list cached: {len(all_cars)} cars -> {CAR_LIST_CACHE_FILE}")
+            logger.info(
+                f"Car list cached: {len(all_cars)} cars -> {CAR_LIST_CACHE_FILE}"
+            )
             try:
                 from storage.db import sync_file_from_path
                 sync_file_from_path(str(cache_path))
@@ -155,7 +169,7 @@ def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
         seen.add(prefix)
         remaining.append(car)
     scraped_prefixes.update(seen)
-    return remaining
+    return remaining, False
 
 
 def main():
@@ -200,7 +214,6 @@ def main():
         while True:
             session += 1
 
-            # Recompute done prefixes at every browser session start
             scraped_prefixes = (
                 checkpoint.get_done_prefixes() | progress.get_scraped_prefixes()
             )
@@ -218,12 +231,12 @@ def main():
                 cars_this_session = 0
 
                 try:
-                    cars = _get_cars_for_session(
+                    cars, needs_followup = _get_cars_for_session(
                         page, sample_mode, scraped_prefixes, notes, checkpoint
                     )
 
-                    if not cars:
-                        logger.info("No more cars to scrape. Done!")
+                    if not cars and not needs_followup:
+                        logger.info("All EGY cars scraped! Scraper done.")
                         break
 
                     for car in cars:
@@ -265,6 +278,15 @@ def main():
                                 f"restarting browser to clear memory"
                             )
                             break
+
+                    # If Phase 1 was used and no restart was triggered yet,
+                    # force a restart so Phase 2 runs in the next session
+                    if needs_followup and not need_restart:
+                        need_restart = True
+                        logger.info(
+                            "Phase 1 complete - restarting browser to "
+                            "discover and scrape remaining cars (Phase 2)"
+                        )
 
                 except KeyboardInterrupt:
                     interrupted = True
