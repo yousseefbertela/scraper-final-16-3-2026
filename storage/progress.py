@@ -10,6 +10,7 @@ If a prefix is marked "completed", any car with that same prefix is skipped.
 """
 
 import csv
+import io
 import logging
 import os
 from datetime import datetime
@@ -42,15 +43,29 @@ class ProgressWriter:
     def get_scraped_prefixes(self) -> set:
         """
         Return the set of 4-char prefixes where status == 'completed'.
-        Used at startup to skip already-done cars.
+        NOTE: audit log only -- not used for skip decisions (checkpoint is the source of truth).
+        Reads from PostgreSQL first, falls back to local file.
         """
         prefixes = set()
+        # Try DB first
+        try:
+            from storage.db import get_file_content
+            content = get_file_content(os.path.basename(self.filepath))
+            if content:
+                for row in csv.DictReader(io.StringIO(content)):
+                    if row.get("status") == "completed":
+                        p = (row.get("prefix") or "").strip()
+                        if p:
+                            prefixes.add(p)
+                return prefixes
+        except Exception as e:
+            logger.warning(f"Could not read progress from DB ({e}), trying local file...")
+        # Fall back to local file
         if not os.path.exists(self.filepath):
             return prefixes
         try:
             with open(self.filepath, encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
+                for row in csv.DictReader(f):
                     if row.get("status") == "completed":
                         p = (row.get("prefix") or "").strip()
                         if p:

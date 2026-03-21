@@ -39,28 +39,6 @@ def setup_logging():
     )
 
 
-def restore_files_from_db():
-    """On startup, ALWAYS pull latest files from PostgreSQL."""
-    try:
-        from storage.db import restore_file_to_path
-        files = (
-            VFINAL_NOTES_FILE,
-            CHECKPOINT_FILE,
-            PROGRESS_FILE,
-            CAR_LIST_CACHE_FILE,
-        )
-        for filepath in files:
-            filename = Path(filepath).name
-            ok = restore_file_to_path(filename, filepath)
-            if ok:
-                logging.getLogger("main").info(f"Restored {filename} from DB")
-            else:
-                logging.getLogger("main").info(
-                    f"No DB backup for {filename} - starting fresh"
-                )
-    except Exception as e:
-        logging.getLogger("main").warning(f"DB restore skipped ({e})")
-
 
 def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
                            notes, checkpoint):
@@ -113,6 +91,18 @@ def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
 
     # ── Phase 2: discover next cars from cache or RealOEM ──
     cache_path = Path(CAR_LIST_CACHE_FILE)
+
+    # If local cache is missing, try to load it from DB (avoids re-enumeration on restart)
+    if not sample_mode and not cache_path.exists():
+        try:
+            from storage.db import get_file_content
+            content = get_file_content(cache_path.name)
+            if content:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(content, encoding="utf-8")
+                logger.info("Loaded car list cache from PostgreSQL")
+        except Exception:
+            pass
 
     if not sample_mode and cache_path.exists():
         try:
@@ -213,10 +203,7 @@ def main():
     except Exception as e:
         logger.warning(f"DB init skipped: {e}")
 
-    # --- Restore ALL files from DB ---
-    restore_files_from_db()
-
-    # --- Storage layer ---
+    # --- Storage layer (each class reads from PostgreSQL directly on init) ---
     notes      = NotesWriter(VFINAL_NOTES_FILE)
     checkpoint = CheckpointManager(CHECKPOINT_FILE)
     progress   = ProgressWriter(PROGRESS_FILE)

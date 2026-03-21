@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 try:
     from dotenv import load_dotenv
@@ -24,13 +25,13 @@ MAX_RETRIES = 3
 # --- Market ---
 EGY_ONLY = True           # Only scrape EGY market; skip all others
 
-# --- Output paths ---
-DATA_DIR             = "data"
-VFINAL_NOTES_FILE    = "data/vFinal_notes.json"
-CHECKPOINT_FILE      = "data/checkpoint.json"
-LOG_FILE             = "data/scraper.log"
-PROGRESS_FILE        = "data/scraped_progress.csv"
-CAR_LIST_CACHE_FILE  = "data/car_list.json"
+# --- Output paths (system temp dir -- nothing written to project folder) ---
+DATA_DIR             = os.path.join(tempfile.gettempdir(), "bmw_scraper_data")
+VFINAL_NOTES_FILE    = os.path.join(DATA_DIR, "vFinal_notes.json")
+CHECKPOINT_FILE      = os.path.join(DATA_DIR, "checkpoint.json")
+LOG_FILE             = os.path.join(DATA_DIR, "scraper.log")
+PROGRESS_FILE        = os.path.join(DATA_DIR, "scraped_progress.csv")
+CAR_LIST_CACHE_FILE  = os.path.join(DATA_DIR, "car_list.json")
 
 # --- PostgreSQL (file-mirror storage) ---
 DATABASE_URL = os.getenv(

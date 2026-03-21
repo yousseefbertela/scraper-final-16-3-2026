@@ -106,3 +106,23 @@ def restore_file_to_path(filename: str, filepath: str) -> bool:
     except Exception as e:
         logger.warning(f"DB restore failed for {filename}: {e}")
     return False
+
+def get_file_content(filename: str):
+    """
+    Return file content from DB as a string, or None if not found.
+    Used by storage classes to read directly from DB without writing to disk.
+    """
+    if not _DB_AVAILABLE:
+        return None
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT content FROM scraped_files WHERE filename = %s",
+                    (filename,),
+                )
+                row = cur.fetchone()
+        return row[0] if row and row[0] else None
+    except Exception as e:
+        logger.warning(f"DB get_file_content failed for {filename}: {e}")
+        return None

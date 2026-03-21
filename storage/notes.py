@@ -141,6 +141,17 @@ class NotesWriter:
     # ------------------------------------------------------------------ #
 
     def _load(self) -> dict:
+        # PostgreSQL is the primary source of truth -- read directly, no local file needed
+        try:
+            from storage.db import get_file_content
+            content = get_file_content(os.path.basename(self.filepath))
+            if content:
+                data = json.loads(content)
+                logger.info("Loaded notes from PostgreSQL")
+                return data
+        except Exception as e:
+            logger.warning(f"Could not load notes from DB ({e}), trying local file...")
+        # Fall back to local file (DB unavailable or very first run)
         if os.path.exists(self.filepath):
             try:
                 with open(self.filepath, "r", encoding="utf-8") as f:
