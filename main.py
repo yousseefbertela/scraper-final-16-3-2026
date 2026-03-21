@@ -244,10 +244,11 @@ def main():
             interrupted  = False
 
             with sync_playwright() as p:
-                browser, context, page = launch_browser(p)
+                browser = None          # defined early so finally can reference it safely
                 cars_this_session = 0
 
                 try:
+                    browser, context, page = launch_browser(p)
                     cars, needs_followup = _get_cars_for_session(
                         page, sample_mode, scraped_prefixes, notes, checkpoint
                     )
@@ -317,11 +318,12 @@ def main():
                     need_restart = True
 
                 finally:
-                    try:
-                        browser.close()
-                        logger.info("Browser closed.")
-                    except Exception:
-                        pass
+                    if browser is not None:
+                        try:
+                            browser.close()
+                            logger.info("Browser closed.")
+                        except Exception:
+                            pass
 
             gc.collect()
             logger.info("Memory cleared.")
