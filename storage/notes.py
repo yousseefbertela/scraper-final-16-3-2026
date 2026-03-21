@@ -2,7 +2,7 @@
 Notes writer - persists scraped parts data to a structured JSON file.
 
 File is written atomically (write to .tmp, then os.replace) after every
-subgroup so data is never lost even if the process is killed mid-run.
+group so data is never lost even if the process is killed mid-run.
 
 After every atomic write the file is also mirrored to PostgreSQL via
 storage.db.sync_file_from_path (non-blocking; silently ignored if DB is
@@ -60,8 +60,8 @@ class NotesWriter:
 
     def save_subgroup(self, car, group, subgroup, diagram_url, parts):
         """
-        Merge one subgroup's data into the in-memory tree, then flush to disk.
-        Called after every subgroup is scraped.
+        Merge one subgroup's data into the in-memory tree only (no disk write).
+        Call flush() after all subgroups in a group are done to persist.
         """
         series_key = car["series_value"]
         type_key   = car["type_code_full"]
@@ -107,11 +107,15 @@ class NotesWriter:
             "parts":             parts,
         }
 
-        self._atomic_write()
         logger.debug(
-            f"Saved subgroup {diag_key} ({len(parts)} parts) "
+            f"Buffered subgroup {diag_key} ({len(parts)} parts) "
             f"for {type_key} / group {mg_key}"
         )
+
+    def flush(self):
+        """Flush the in-memory tree to disk and PostgreSQL. Call after every group."""
+        self._atomic_write()
+        logger.debug("Flushed notes to disk and DB")
 
     def get_car_dict(self, type_code_full: str):
         """

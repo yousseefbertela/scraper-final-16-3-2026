@@ -161,13 +161,6 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
             subgroups = []
         for subgroup in subgroups:
             diag_id = subgroup["diagId"]
-            # Skip subgroups already successfully scraped (subgroup-level checkpoint)
-            if checkpoint_manager.is_subgroup_done(type_code, mg, diag_id):
-                logger.info(
-                    "  Skipping (already done): subgroup %s - %s",
-                    diag_id, subgroup["name"]
-                )
-                continue
             logger.info("  Subgroup %s: %s", diag_id, subgroup["name"])
             human_delay(SUBGROUP_DELAY)
             try:
@@ -180,9 +173,9 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
                 parts = []
                 diagram_url = ""
             notes_writer.save_subgroup(car, group, subgroup, diagram_url, parts)
-            checkpoint_manager.mark_subgroup_done(car, mg, diag_id)
             total_parts += len(parts)
-            logger.info(f"  Saved {len(parts)} parts for {diag_id}")
+            logger.info(f"  Buffered {len(parts)} parts for {diag_id}")
+        notes_writer.flush()
         checkpoint_manager.mark_group_done(car, mg)
         human_delay(GROUP_DELAY)
     checkpoint_manager.mark_car_done(car)
