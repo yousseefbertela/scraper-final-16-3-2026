@@ -131,6 +131,21 @@ def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
                 f"Phase 2 cache: {len(remaining)} cars remaining "
                 f"of {len(all_cars)} total"
             )
+            if not remaining:
+                # All cars in the cache are already scraped.
+                # Delete the cache so the next session runs a fresh RealOEM enumeration
+                # which may discover new EGY cars.
+                logger.info(
+                    "All cached cars scraped -- clearing car list cache to "
+                    "force fresh EGY discovery in next session."
+                )
+                try:
+                    cache_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                # Return needs_followup=True so outer loop restarts and Phase 2
+                # runs again without a cache, triggering a full RealOEM enumeration.
+                return [], True
             return remaining, False
         except Exception as e:
             logger.warning(f"Could not load car list cache ({e}), re-enumerating...")
@@ -214,9 +229,11 @@ def main():
         while True:
             session += 1
 
-            scraped_prefixes = (
-                checkpoint.get_done_prefixes() | progress.get_scraped_prefixes()
-            )
+            # Use ONLY checkpoint as the source of truth for which cars are done.
+            # progress.csv is an audit log only -- it must NOT be used to skip cars,
+            # because it can become inconsistent with checkpoint after a Railway crash
+            # (e.g. progress.mark_completed fires but checkpoint.mark_car_done does not).
+            scraped_prefixes = checkpoint.get_done_prefixes()
 
             logger.info(
                 f"Browser session {session} - "
@@ -313,8 +330,16 @@ def main():
                 break
 
             if not need_restart:
-                logger.info("All EGY cars scraped! Scraper done.")
-                break
+                # The for-loop finished without hitting the 4-car restart limit.
+                # Force another session so _get_cars_for_session can check whether
+                # there are NEW EGY cars on RealOEM beyond the ones we already know.
+                # The scraper stops ONLY when _get_cars_for_session returns ([], False),
+                # which happens after a fresh enumeration that finds zero remaining cars.
+                need_restart = True
+                logger.info(
+                    "All cars in this batch processed -- restarting to check "
+                    "for more EGY cars on RealOEM."
+                )
 
     finally:
         stop_virtual_display()
