@@ -113,7 +113,7 @@ class NotesWriter:
     def flush(self):
         """Flush the in-memory tree to PostgreSQL. Call after every group."""
         self._write_to_db()
-        logger.debug("Flushed notes to DB")
+        logger.info("Saved group to DB")
 
     def get_car_dict(self, type_code_full: str):
         """
