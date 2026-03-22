@@ -1,14 +1,10 @@
 """
-Notes writer - persists scraped parts data to a structured JSON file.
+Notes writer - persists scraped parts data to PostgreSQL only.
 
-File is written atomically (write to .tmp, then os.replace) after every
-group so data is never lost even if the process is killed mid-run.
+DB is the sole source of truth. No local files are read or written.
+Data is flushed to DB after every group.
 
-After every atomic write the file is also mirrored to PostgreSQL via
-storage.db.sync_file_from_path (non-blocking; silently ignored if DB is
-unavailable).
-
-JSON structure:
+JSON structure (stored as text in scraped_files table):
 {
   "meta": { "created_at": "...", "last_updated": "...", "version": "1.0" },
   "data": {
@@ -47,11 +43,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+_FILENAME = "vFinal_notes.json"
+
 
 class NotesWriter:
     def __init__(self, filepath: str):
-        self.filepath = filepath
-        self._tmp = filepath + ".tmp"
+        # filepath kept for filename derivation only — not written to
+        self._filename = os.path.basename(filepath)
         self.data = self._load()
 
     # ------------------------------------------------------------------ #
@@ -60,7 +58,7 @@ class NotesWriter:
 
     def save_subgroup(self, car, group, subgroup, diagram_url, parts):
         """
-        Merge one subgroup's data into the in-memory tree only (no disk write).
+        Merge one subgroup's data into the in-memory tree only (no DB write).
         Call flush() after all subgroups in a group are done to persist.
         """
         series_key = car["series_value"]
@@ -113,15 +111,14 @@ class NotesWriter:
         )
 
     def flush(self):
-        """Flush the in-memory tree to disk and PostgreSQL. Call after every group."""
-        self._atomic_write()
-        logger.debug("Flushed notes to disk and DB")
+        """Flush the in-memory tree to PostgreSQL. Call after every group."""
+        self._write_to_db()
+        logger.debug("Flushed notes to DB")
 
     def get_car_dict(self, type_code_full: str):
         """
         Extract a car metadata dict from already-saved notes data.
-        Used on startup to resume an in-progress car without re-enumerating
-        the RealOEM dropdowns.
+        Used on startup to resume an in-progress car.
         Returns None if the car has not been saved to notes yet.
         """
         for series_data in self.data["data"].values():
@@ -145,25 +142,17 @@ class NotesWriter:
     # ------------------------------------------------------------------ #
 
     def _load(self) -> dict:
-        # PostgreSQL is the primary source of truth -- read directly, no local file needed
+        """Load from PostgreSQL only. Start fresh if not found."""
         try:
             from storage.db import get_file_content
-            content = get_file_content(os.path.basename(self.filepath))
+            content = get_file_content(self._filename)
             if content:
                 data = json.loads(content)
                 logger.info("Loaded notes from PostgreSQL")
                 return data
         except Exception as e:
-            logger.warning(f"Could not load notes from DB ({e}), trying local file...")
-        # Fall back to local file (DB unavailable or very first run)
-        if os.path.exists(self.filepath):
-            try:
-                with open(self.filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                logger.info(f"Loaded existing notes from {self.filepath}")
-                return data
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning(f"Could not load notes ({e}), starting fresh.")
+            logger.warning(f"Could not load notes from DB: {e}")
+        logger.info("Starting fresh notes (nothing in DB)")
         return {
             "meta": {
                 "created_at": datetime.utcnow().isoformat(),
@@ -173,17 +162,11 @@ class NotesWriter:
             "data": {},
         }
 
-    def _atomic_write(self):
+    def _write_to_db(self):
         self.data["meta"]["last_updated"] = datetime.utcnow().isoformat()
         try:
-            with open(self._tmp, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2, ensure_ascii=False)
-            os.replace(self._tmp, self.filepath)
-        except OSError as e:
-            logger.error(f"Failed to write notes: {e}")
-            return
-        try:
-            from storage.db import sync_file_from_path
-            sync_file_from_path(self.filepath)
-        except Exception:
-            pass
+            from storage.db import sync_file
+            content = json.dumps(self.data, indent=2, ensure_ascii=False)
+            sync_file(self._filename, content)
+        except Exception as e:
+            logger.error(f"Failed to write notes to DB: {e}")

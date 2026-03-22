@@ -33,3 +33,12 @@ python
 
 # Environment secrets — never commit!
 .env
+
+# Node
+frontend-database/node_modules/
+frontend-database/bmw-parts-export*.json
+
+# Misc local files
+egy_cars_only.json
+prompt-explanation.md
+py

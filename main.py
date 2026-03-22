@@ -3,20 +3,14 @@ import argparse
 import gc
 import json
 import logging
-import os
 import sys
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from config import (
-    VFINAL_NOTES_FILE, CHECKPOINT_FILE, LOG_FILE,
-    PROGRESS_FILE, DATA_DIR, CAR_LIST_CACHE_FILE,
-)
+from config import VFINAL_NOTES_FILE, CHECKPOINT_FILE, LOG_FILE, PROGRESS_FILE
 from scraper.browser import (
     launch_browser, start_virtual_display, stop_virtual_display, BrowserCrashError
 )
-from scraper.car_selector import build_car_list
 from scraper.parts_scraper import scrape_car_parts
 from storage.notes import NotesWriter
 from storage.checkpoint import CheckpointManager
@@ -25,185 +19,135 @@ from storage.progress import ProgressWriter
 # Restart browser every N cars to reset memory
 BROWSER_RESTART_EVERY = 4
 
+# Sample car for --sample mode (navigates directly, no dropdown enumeration)
+_SAMPLE_CAR = {
+    "type_code_full": "VA99-EGY-05-2005-E90-BMW-320i",
+    "series_value":   "E90",
+    "series_label":   "3' E90",
+    "body":           "Lim",
+    "model":          "320i",
+    "market":         "EGY",
+    "prod_month":     "200805",
+    "engine":         "N46",
+    "steering":       "",
+}
+
 
 def setup_logging():
-    Path(DATA_DIR).mkdir(exist_ok=True)
     log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     logging.basicConfig(
         level=logging.INFO,
         format=log_format,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        ],
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
 
 
-
-def _get_cars_for_session(page, sample_mode: bool, scraped_prefixes: set,
-                           notes, checkpoint):
+def _get_remaining_cars(sample_mode: bool, scraped_prefixes: set,
+                        notes: NotesWriter, checkpoint: CheckpointManager) -> list:
     """
-    Return (cars, needs_followup) for this browser session.
+    Return the list of cars to scrape this session.
 
-    needs_followup=True means Phase 1 was used — after processing these cars
-    the outer loop MUST restart to discover more cars via Phase 2.
-
-    Phase 1 - Resume incomplete cars instantly (no dropdown navigation):
-        Find cars in checkpoint that are started but not completed.
-        Pull their metadata straight from notes.json.
-        Always sets needs_followup=True so Phase 2 runs next session.
-
-    Phase 2 - Discover remaining cars:
-        Load from car_list.json cache if available, otherwise enumerate
-        RealOEM dropdowns and save the cache for future sessions.
-        needs_followup=False (list is exhaustive; loop exits when empty).
+    - sample_mode: returns the single sample car if not already done.
+    - full mode:
+        1. Resume any in-progress car from checkpoint (metadata pulled from notes).
+        2. Load car_list.json from DB, filter out done 4-char prefixes.
+    Returns [] when everything is done.
     """
     logger = logging.getLogger("main")
 
-    # ── Phase 1: resume in-progress cars from notes.json metadata ──
+    if sample_mode:
+        tc = _SAMPLE_CAR["type_code_full"]
+        if checkpoint.is_car_done(tc):
+            logger.info("Sample car already done.")
+            return []
+        return [_SAMPLE_CAR]
+
+    # --- Resume in-progress cars (checkpoint started but not completed) ---
     resume_cars = []
-    if not sample_mode:
-        for tc, entry in checkpoint.data.get("cars", {}).items():
-            if entry.get("completed", False):
-                continue
-            prefix = tc[:4]
-            if prefix in scraped_prefixes:
-                continue
-            car_dict = notes.get_car_dict(tc)
-            if car_dict:
-                resume_cars.append(car_dict)
-                scraped_prefixes.add(prefix)
-                logger.info(f"Phase 1 resume: {tc} (metadata from notes.json)")
-            else:
-                logger.warning(
-                    f"Checkpoint has {tc} as in-progress but no notes data found. "
-                    f"Will pick it up in Phase 2 enumeration."
-                )
+    for tc, entry in checkpoint.data.get("cars", {}).items():
+        if entry.get("completed", False):
+            continue
+        prefix = tc[:4]
+        if prefix in scraped_prefixes:
+            continue
+        car_dict = notes.get_car_dict(tc)
+        if car_dict:
+            resume_cars.append(car_dict)
+            scraped_prefixes.add(prefix)
+            logger.info(f"Resume in-progress: {tc}")
+        else:
+            logger.warning(
+                f"Checkpoint has {tc} as in-progress but no notes data found — "
+                f"will pick it up from car_list.json."
+            )
 
     if resume_cars:
-        logger.info(
-            f"Returning {len(resume_cars)} in-progress car(s) for immediate resume. "
-            f"RealOEM dropdown enumeration skipped. "
-            f"Will enumerate remaining cars in next session."
-        )
-        # needs_followup=True so the outer loop restarts and runs Phase 2 next
-        return resume_cars, True
+        return resume_cars
 
-    # ── Phase 2: discover next cars from cache or RealOEM ──
-    cache_path = Path(CAR_LIST_CACHE_FILE)
+    # --- Load full car list from DB, filter done prefixes ---
+    try:
+        from storage.db import get_file_content
+        content = get_file_content("car_list.json")
+        if not content:
+            logger.error("car_list.json not found in DB — cannot discover cars. "
+                         "Upload it first.")
+            return []
+        all_cars = json.loads(content)
+    except Exception as e:
+        logger.error(f"Failed to load car_list.json from DB: {e}")
+        return []
 
-    # If local cache is missing, try to load it from DB (avoids re-enumeration on restart)
-    if not sample_mode and not cache_path.exists():
-        try:
-            from storage.db import get_file_content
-            content = get_file_content(cache_path.name)
-            if content:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_text(content, encoding="utf-8")
-                logger.info("Loaded car list cache from PostgreSQL")
-        except Exception:
-            pass
-
-    if not sample_mode and cache_path.exists():
-        try:
-            with open(str(cache_path), encoding="utf-8") as f:
-                all_cars = json.load(f)
-            remaining = []
-            seen = set(scraped_prefixes)
-            for car in all_cars:
-                prefix = car["type_code_full"][:4]
-                if prefix in seen:
-                    continue
-                seen.add(prefix)
-                remaining.append(car)
-            scraped_prefixes.update(seen)
-            logger.info(
-                f"Phase 2 cache: {len(remaining)} cars remaining "
-                f"of {len(all_cars)} total"
-            )
-            if not remaining:
-                # All cars in the cache are already scraped.
-                # Delete the cache so the next session runs a fresh RealOEM enumeration
-                # which may discover new EGY cars.
-                logger.info(
-                    "All cached cars scraped -- clearing car list cache to "
-                    "force fresh EGY discovery in next session."
-                )
-                try:
-                    cache_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                # Return needs_followup=True so outer loop restarts and Phase 2
-                # runs again without a cache, triggering a full RealOEM enumeration.
-                return [], True
-            return remaining, False
-        except Exception as e:
-            logger.warning(f"Could not load car list cache ({e}), re-enumerating...")
-
-    # No cache - enumerate from RealOEM and save for future sessions
-    logger.info(
-        "Phase 2: building full car list from RealOEM dropdowns "
-        "(first time - will be cached for future restarts)..."
-    )
-    all_cars = list(build_car_list(
-        page, sample_mode=sample_mode, scraped_prefixes=set()
-    ))
-
-    if not sample_mode:
-        try:
-            Path(DATA_DIR).mkdir(exist_ok=True)
-            with open(str(cache_path), "w", encoding="utf-8") as f:
-                json.dump(all_cars, f, indent=2, ensure_ascii=False)
-            logger.info(
-                f"Car list cached: {len(all_cars)} cars -> {CAR_LIST_CACHE_FILE}"
-            )
-            try:
-                from storage.db import sync_file_from_path
-                sync_file_from_path(str(cache_path))
-            except Exception:
-                pass
-        except Exception as e:
-            logger.warning(f"Could not save car list cache: {e}")
+    # car_list.json structure: {"typecode#N [XXXX]": {"1. BMW...": car_dict, ...}, ...}
+    # Flatten to one representative car per group (first variant per prefix group)
+    flat_cars = []
+    if isinstance(all_cars, dict):
+        for group_variants in all_cars.values():
+            if isinstance(group_variants, dict):
+                variants = list(group_variants.values())
+                if variants:
+                    flat_cars.append(variants[0])
+    else:
+        flat_cars = list(all_cars)  # already flat (future-proof)
 
     remaining = []
     seen = set(scraped_prefixes)
-    for car in all_cars:
+    for car in flat_cars:
         prefix = car["type_code_full"][:4]
         if prefix in seen:
             continue
         seen.add(prefix)
         remaining.append(car)
-    scraped_prefixes.update(seen)
-    return remaining, False
+
+    logger.info(
+        f"Car list: {len(remaining)} remaining of {len(flat_cars)} total "
+        f"({len(flat_cars) - len(remaining)} already scraped)"
+    )
+    return remaining
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="RealOEM BMW Parts Scraper - EGY full run"
-    )
+    parser = argparse.ArgumentParser(description="RealOEM BMW Parts Scraper")
     parser.add_argument(
-        "--sample",
-        action="store_true",
+        "--sample", action="store_true",
         help="Sample mode: scrape only E90 320i EGY for testing.",
     )
     args = parser.parse_args()
     sample_mode = args.sample
 
-    Path(DATA_DIR).mkdir(exist_ok=True)
     setup_logging()
     logger = logging.getLogger("main")
 
-    mode_str = "SAMPLE (E90 320i EGY)" if sample_mode else "FULL (all EGY series)"
+    mode_str = "SAMPLE (E90 320i EGY)" if sample_mode else "FULL (car_list.json from DB)"
     logger.info(f"=== RealOEM BMW Scraper starting - mode: {mode_str} ===")
 
-    # --- Initialise DB ---
+    # --- Init DB ---
     try:
         from storage.db import ensure_table
         ensure_table()
     except Exception as e:
         logger.warning(f"DB init skipped: {e}")
 
-    # --- Storage layer (each class reads from PostgreSQL directly on init) ---
+    # --- Storage (all read from DB on init) ---
     notes      = NotesWriter(VFINAL_NOTES_FILE)
     checkpoint = CheckpointManager(CHECKPOINT_FILE)
     progress   = ProgressWriter(PROGRESS_FILE)
@@ -215,15 +159,9 @@ def main():
     try:
         while True:
             session += 1
-
-            # Use ONLY checkpoint as the source of truth for which cars are done.
-            # progress.csv is an audit log only -- it must NOT be used to skip cars,
-            # because it can become inconsistent with checkpoint after a Railway crash
-            # (e.g. progress.mark_completed fires but checkpoint.mark_car_done does not).
             scraped_prefixes = checkpoint.get_done_prefixes()
-
             logger.info(
-                f"Browser session {session} - "
+                f"Browser session {session} — "
                 f"{len(scraped_prefixes)} prefixes done so far"
             )
 
@@ -231,17 +169,18 @@ def main():
             interrupted  = False
 
             with sync_playwright() as p:
-                browser = None          # defined early so finally can reference it safely
+                browser = None
                 cars_this_session = 0
 
                 try:
                     browser, context, page = launch_browser(p)
-                    cars, needs_followup = _get_cars_for_session(
-                        page, sample_mode, scraped_prefixes, notes, checkpoint
+
+                    cars = _get_remaining_cars(
+                        sample_mode, scraped_prefixes, notes, checkpoint
                     )
 
-                    if not cars and not needs_followup:
-                        logger.info("All EGY cars scraped! Scraper done.")
+                    if not cars:
+                        logger.info("All cars scraped! Scraper done.")
                         break
 
                     for car in cars:
@@ -258,40 +197,27 @@ def main():
                                 page, car, notes, checkpoint
                             )
                             progress.mark_completed(type_code, parts_count)
-                            logger.info(
-                                f"Finished {type_code}: {parts_count} parts"
-                            )
+                            logger.info(f"Finished {type_code}: {parts_count} parts")
                         except BrowserCrashError as e:
                             logger.error(
                                 f"Browser crashed scraping {type_code}: {e} "
-                                f"- restarting browser and resuming from checkpoint"
+                                f"— restarting browser"
                             )
                             need_restart = True
                             break
                         except Exception as e:
                             logger.error(
-                                f"Failed to scrape {type_code}: {e}",
-                                exc_info=True,
+                                f"Failed to scrape {type_code}: {e}", exc_info=True
                             )
 
                         cars_this_session += 1
-
                         if cars_this_session >= BROWSER_RESTART_EVERY:
                             need_restart = True
                             logger.info(
-                                f"Scraped {BROWSER_RESTART_EVERY} cars - "
+                                f"Scraped {BROWSER_RESTART_EVERY} cars — "
                                 f"restarting browser to clear memory"
                             )
                             break
-
-                    # If Phase 1 was used and no restart was triggered yet,
-                    # force a restart so Phase 2 runs in the next session
-                    if needs_followup and not need_restart:
-                        need_restart = True
-                        logger.info(
-                            "Phase 1 complete - restarting browser to "
-                            "discover and scrape remaining cars (Phase 2)"
-                        )
 
                 except KeyboardInterrupt:
                     interrupted = True
@@ -299,7 +225,7 @@ def main():
 
                 except Exception as e:
                     logger.error(
-                        f"Unexpected session error: {e} - restarting browser",
+                        f"Unexpected session error: {e} — restarting browser",
                         exc_info=True,
                     )
                     need_restart = True
@@ -319,15 +245,11 @@ def main():
                 break
 
             if not need_restart:
-                # The for-loop finished without hitting the 4-car restart limit.
-                # Force another session so _get_cars_for_session can check whether
-                # there are NEW EGY cars on RealOEM beyond the ones we already know.
-                # The scraper stops ONLY when _get_cars_for_session returns ([], False),
-                # which happens after a fresh enumeration that finds zero remaining cars.
+                # The for-loop finished without hitting the 4-car limit.
+                # Do one more session to confirm nothing remains.
                 need_restart = True
                 logger.info(
-                    "All cars in this batch processed -- restarting to check "
-                    "for more EGY cars on RealOEM."
+                    "Batch complete — restarting to verify no cars remain."
                 )
 
     finally:

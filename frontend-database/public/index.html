@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BMW Parts Catalog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"/>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">
+        <div class="brand-logo">
+          <span class="logo-b">B</span><span class="logo-mw">MW</span>
+        </div>
+        <div class="brand-sub">Parts Catalog</div>
+      </div>
+    </div>
+
+    <nav id="sidenav">
+      <button class="nav-item active" data-view="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+      </button>
+      <button class="nav-item" data-view="catalog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Catalog
+      </button>
+      <button class="nav-item" data-view="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Part Search
+      </button>
+      <button class="nav-item" data-view="target">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Target List
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="db-status">
+        <span class="dot"></span>
+        <span>PostgreSQL · Railway</span>
+      </div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="topbar">
+      <div id="breadcrumb">Overview</div>
+      <button id="export-btn" title="Export all data as JSON" onclick="exportData(this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export JSON
+      </button>
+      <button id="refresh-btn" title="Refresh data">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+    </div>
+
+    <!-- DASHBOARD VIEW -->
+    <section id="view-dashboard" class="view active">
+      <div class="page-title">Overview</div>
+      <div class="stat-grid" id="stat-grid">
+        <div class="stat-card"><div class="stat-value" id="s-cars">—</div><div class="stat-label">Vehicles</div></div>
+        <div class="stat-card"><div class="stat-value" id="s-parts">—</div><div class="stat-label">Total Parts</div></div>
+        <div class="stat-card"><div class="stat-value" id="s-groups">—</div><div class="stat-label">Groups</div></div>
+        <div class="stat-card"><div class="stat-value" id="s-subgroups">—</div><div class="stat-label">Subgroups</div></div>
+      </div>
+
+      <div class="section-title">Vehicles</div>
+      <div id="car-cards" class="car-grid"></div>
+    </section>
+
+    <!-- CATALOG VIEW -->
+    <section id="view-catalog" class="view">
+      <div class="page-title" id="catalog-title">Select a Vehicle</div>
+      <div id="catalog-content">
+        <div class="hint">Choose a vehicle from Overview, or select below.</div>
+        <div id="catalog-car-list" class="car-grid-small"></div>
+      </div>
+    </section>
+
+    <!-- GROUPS VIEW (nested inside catalog) -->
+    <section id="view-groups" class="view">
+      <div class="back-row">
+        <button class="back-btn" id="back-to-catalog">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+          Back to Vehicles
+        </button>
+      </div>
+      <div class="page-title" id="groups-title">Groups</div>
+      <div class="car-meta" id="groups-meta"></div>
+      <div class="section-title">Part Groups</div>
+      <div id="groups-list" class="groups-grid"></div>
+    </section>
+
+    <!-- PARTS VIEW -->
+    <section id="view-parts" class="view">
+      <div class="back-row">
+        <button class="back-btn" id="back-to-groups">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+          Back to Groups
+        </button>
+      </div>
+      <div class="page-title" id="parts-title">Parts</div>
+      <div id="parts-content"></div>
+    </section>
+
+    <!-- SEARCH VIEW -->
+    <section id="view-search" class="view">
+      <div class="page-title">Part Search</div>
+      <div class="search-bar-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="search-input" type="text" placeholder="Search by part number, description..." autocomplete="off" spellcheck="false"/>
+      </div>
+      <div id="search-results"></div>
+    </section>
+
+    <!-- TARGET LIST VIEW -->
+    <section id="view-target" class="view">
+      <div class="page-title">Target List</div>
+      <div class="stat-grid" id="target-stat-grid"></div>
+      <div class="section-title" id="target-section-title"></div>
+      <div id="target-content"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
