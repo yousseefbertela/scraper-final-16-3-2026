@@ -86,6 +86,7 @@ def launch_browser(playwright_instance) -> tuple:
     )
     page: Page = context.new_page()
     _PlaywrightStealth().apply_stealth_sync(page)
+    page.set_default_timeout(45_000)   # 45s cap on ALL page ops incl. page.title()
     logger.info("Browser launched (headed Chrome + stealth)")
     return browser, context, page
 
