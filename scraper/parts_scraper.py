@@ -163,6 +163,7 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
             diag_id = subgroup["diagId"]
             logger.info("  Subgroup %s: %s", diag_id, subgroup["name"])
             human_delay(SUBGROUP_DELAY)
+            scrape_error = None
             try:
                 parts = scrape_parts_table(page, type_code, diag_id)
                 diagram_url = get_diagram_image_url(page, type_code, diag_id)
@@ -172,7 +173,8 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
                 logger.error(f"  Error scraping subgroup {diag_id}: {e}")
                 parts = []
                 diagram_url = ""
-            notes_writer.save_subgroup(car, group, subgroup, diagram_url, parts)
+                scrape_error = str(e)
+            notes_writer.save_subgroup(car, group, subgroup, diagram_url, parts, error=scrape_error)
             total_parts += len(parts)
             logger.info(f"  Buffered {len(parts)} parts for {diag_id}")
         notes_writer.flush()

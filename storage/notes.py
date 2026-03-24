@@ -56,7 +56,7 @@ class NotesWriter:
     # Public API                                                           #
     # ------------------------------------------------------------------ #
 
-    def save_subgroup(self, car, group, subgroup, diagram_url, parts):
+    def save_subgroup(self, car, group, subgroup, diagram_url, parts, error=None):
         """
         Merge one subgroup's data into the in-memory tree only (no DB write).
         Call flush() after all subgroups in a group are done to persist.
@@ -98,12 +98,15 @@ class NotesWriter:
 
         group_node = model_node["groups"][mg_key]
 
-        group_node["subgroups"][diag_key] = {
+        entry = {
             "subgroup_name":     subgroup["name"],
             "diagram_image_url": diagram_url,
             "scraped_at":        datetime.utcnow().isoformat(),
             "parts":             parts,
         }
+        if error:
+            entry["scrape_error"] = str(error)
+        group_node["subgroups"][diag_key] = entry
 
         logger.debug(
             f"Buffered subgroup {diag_key} ({len(parts)} parts) "
