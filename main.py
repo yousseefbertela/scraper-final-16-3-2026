@@ -52,10 +52,8 @@ def _load_checkpoint_data() -> dict:
     from storage import db
     data = db.load_checkpoint(SCRAPER_ID)
     if data:
-        logger_ = logging.getLogger("main")
-        logger_.info(f"Checkpoint loaded from DB (scraper {SCRAPER_ID})")
+        logging.getLogger("main").info(f"Checkpoint loaded from DB (scraper {SCRAPER_ID})")
         return data
-    # Fallback: local file
     try:
         with open(CHECKPOINT_FILE, encoding="utf-8") as f:
             return json.load(f)
@@ -74,42 +72,14 @@ def _save_checkpoint_data(data: dict):
 
 # ── Car list helpers ──────────────────────────────────────────────────────────
 
-def _get_target_codes() -> set:
-    """
-    Return the set of 4-char target codes for this SCRAPER_ID from DB.
-    Returns None if the car list could not be loaded (meaning: scrape all).
-    """
-    logger_ = logging.getLogger("main")
-    from storage import db
-    car_list = db.get_car_list(SCRAPER_ID)
-    if not car_list:
-        logger_.warning(
-            f"No car list found in DB for SCRAPER_ID={SCRAPER_ID}. "
-            f"Will scrape all discovered cars."
-        )
-        return None
-    codes = {c["code"] for c in car_list}
-    logger_.info(
-        f"Scraper {SCRAPER_ID}: targeting {len(codes)} cars — "
-        f"{sorted(codes)[:5]}{'…' if len(codes) > 5 else ''}"
-    )
-    return codes
-
-
-# ── Main car discovery ────────────────────────────────────────────────────────
-
 def _get_remaining_cars(sample_mode: bool, scraped_prefixes: set,
-                        notes: NotesWriter, checkpoint: CheckpointManager,
-                        target_codes) -> list:
+                        checkpoint: CheckpointManager) -> list:
     """
     Return the list of cars to scrape this session.
 
-    - sample_mode: returns the single sample car if not already done.
-    - full mode:
-        1. Resume any in-progress car from checkpoint (metadata pulled from notes).
-        2. Load car_list.json from DB (legacy discovery cache), filter by
-           done prefixes AND target_codes for this SCRAPER_ID.
-    Returns [] when everything is done.
+    Each item from scraper_car_lists has: {code, series, model, body, engine, market, prod_month}.
+    Already-scraped prefixes (from checkpoint) are filtered out.
+    type_code_full is NOT yet set here; it will be discovered per-car in the main loop.
     """
     logger = logging.getLogger("main")
 
@@ -120,88 +90,35 @@ def _get_remaining_cars(sample_mode: bool, scraped_prefixes: set,
             return []
         return [_SAMPLE_CAR]
 
-    # --- Resume in-progress cars (checkpoint started but not completed) ---
-    resume_cars = []
-    for tc, entry in checkpoint.data.get("cars", {}).items():
-        if entry.get("completed", False):
-            continue
-        prefix = tc[:4]
-        if prefix in scraped_prefixes:
-            continue
-        # Only resume cars belonging to this scraper's target list
-        if target_codes is not None and prefix not in target_codes:
-            continue
-        car_dict = notes.get_car_dict(tc)
-        if car_dict:
-            resume_cars.append(car_dict)
-            scraped_prefixes.add(prefix)
-            logger.info(f"Resume in-progress: {tc}")
-        else:
-            logger.warning(
-                f"Checkpoint has {tc} as in-progress but no notes data — "
-                f"will pick it up from car_list.json."
-            )
-
-    if resume_cars:
-        return resume_cars
-
-    # --- Load full car list from DB (legacy discovery cache), filter done & target ---
-    try:
-        from storage.db import get_file_content
-        content = get_file_content("car_list.json")
-        if not content:
-            logger.warning(
-                "car_list.json not found in DB. "
-                "Scraper will rely on live discovery for new cars."
-            )
-            return []
-        all_cars = json.loads(content)
-    except Exception as e:
-        logger.error(f"Failed to load car_list.json from DB: {e}")
+    from storage.db import get_car_list
+    car_list = get_car_list(SCRAPER_ID)
+    if not car_list:
+        logger.warning(
+            f"No car list found in DB for SCRAPER_ID={SCRAPER_ID}. "
+            f"Nothing to scrape."
+        )
         return []
-
-    # Flatten: {"typecode#N [XXXX]": {"1. BMW...": car_dict, ...}}
-    flat_cars = []
-    if isinstance(all_cars, dict):
-        for group_variants in all_cars.values():
-            if isinstance(group_variants, dict):
-                variants = list(group_variants.values())
-                if variants:
-                    flat_cars.append(variants[0])
-    else:
-        flat_cars = list(all_cars)
 
     remaining = []
     seen = set(scraped_prefixes)
-    for car in flat_cars:
-        prefix = car["type_code_full"][:4]
-        if prefix in seen:
+    for car_info in car_list:
+        code = car_info["code"]
+        if code in seen:
             continue
-        # Filter by this scraper's target list
-        if target_codes is not None and prefix not in target_codes:
+        # Also skip if we have a cached type_code_full that is marked done
+        type_code_map = checkpoint.data.get("type_code_map", {})
+        cached_tc = type_code_map.get(code)
+        if cached_tc and checkpoint.is_car_done(cached_tc):
+            seen.add(code)
             continue
-        seen.add(prefix)
-        remaining.append(car)
+        seen.add(code)
+        remaining.append(car_info)
 
     logger.info(
         f"Scraper {SCRAPER_ID}: {len(remaining)} cars remaining "
-        f"(target={len(target_codes) if target_codes else 'all'}, "
-        f"done={len(scraped_prefixes)})"
+        f"({len(scraped_prefixes)} already done)"
     )
     return remaining
-
-
-# ── Notes save wrapper (uses advisory lock) ───────────────────────────────────
-
-def _save_notes_to_db(notes: NotesWriter):
-    """Persist the current notes data to DO DB under this scraper's prefix key."""
-    from storage.db import save_with_lock
-    try:
-        content = json.dumps(notes.data, ensure_ascii=False)
-        # Store as "vFinal_notes.json" for backward compat with frontend
-        save_with_lock("vFinal_notes.json", content)
-    except Exception as e:
-        logging.getLogger("main").warning(f"_save_notes_to_db failed: {e}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -228,9 +145,6 @@ def main():
     except Exception as e:
         logger.warning(f"DB init skipped: {e}")
 
-    # --- Load target codes for this scraper ---
-    target_codes = None if sample_mode else _get_target_codes()
-
     # --- Storage ---
     notes      = NotesWriter(VFINAL_NOTES_FILE)
     progress   = ProgressWriter(PROGRESS_FILE)
@@ -239,7 +153,7 @@ def main():
     cp_data    = _load_checkpoint_data()
     checkpoint = CheckpointManager(CHECKPOINT_FILE)
     if cp_data:
-        checkpoint.data = cp_data  # inject DB data into in-memory checkpoint
+        checkpoint.data = cp_data
 
     start_virtual_display()
 
@@ -265,45 +179,82 @@ def main():
                     browser, context, page = launch_browser(p)
 
                     cars = _get_remaining_cars(
-                        sample_mode, scraped_prefixes, notes, checkpoint, target_codes
+                        sample_mode, scraped_prefixes, checkpoint
                     )
 
                     if not cars:
                         logger.info("All assigned cars scraped! Scraper done.")
                         break
 
-                    for car in cars:
-                        type_code = car["type_code_full"]
+                    for car_info in cars:
+                        # ── Resolve type_code_full ────────────────────────
+                        if sample_mode:
+                            # Sample car already has type_code_full
+                            car = car_info
+                            type_code_full = car["type_code_full"]
+                        else:
+                            code = car_info["code"]
+                            type_code_map = checkpoint.data.setdefault("type_code_map", {})
+                            type_code_full = type_code_map.get(code)
 
-                        if checkpoint.is_car_done(type_code):
+                            if not type_code_full:
+                                logger.info(f"Navigating RealOEM to find type_code for {code}")
+                                from scraper.car_selector import find_car_type_code
+                                car = find_car_type_code(page, car_info)
+                                if car is None:
+                                    logger.warning(
+                                        f"Could not find type_code for {code}, skipping"
+                                    )
+                                    continue
+                                type_code_full = car["type_code_full"]
+                                # Cache for future sessions
+                                type_code_map[code] = type_code_full
+                                _save_checkpoint_data(checkpoint.data)
+                                logger.info(f"Found type_code: {type_code_full}")
+                            else:
+                                # Reconstruct car dict from cached type_code + car_info
+                                model = car_info.get("model", "").strip()
+                                for brand in ("BMW ", "MINI "):
+                                    if model.startswith(brand):
+                                        model = model[len(brand):]
+                                car = {
+                                    "type_code_full": type_code_full,
+                                    "series_value":   car_info.get("series", ""),
+                                    "series_label":   car_info.get("series", ""),
+                                    "body":           car_info.get("body", ""),
+                                    "model":          model,
+                                    "market":         car_info.get("market", "EUR"),
+                                    "prod_month":     (car_info.get("prod_month") or "").replace("-", ""),
+                                    "engine":         car_info.get("engine", ""),
+                                    "steering":       "",
+                                }
+
+                        if checkpoint.is_car_done(type_code_full):
                             continue
 
-                        logger.info(f"=== Scraping car: {type_code} ===")
-                        progress.mark_started(type_code)
+                        logger.info(f"=== Scraping car: {type_code_full} ===")
+                        progress.mark_started(type_code_full)
 
                         try:
                             parts_count = scrape_car_parts(
                                 page, car, notes, checkpoint
                             )
-                            progress.mark_completed(type_code, parts_count)
-                            logger.info(f"Finished {type_code}: {parts_count} parts")
+                            progress.mark_completed(type_code_full, parts_count)
+                            logger.info(f"Finished {type_code_full}: {parts_count} parts")
 
                             # Persist checkpoint to DB after each completed car
                             _save_checkpoint_data(checkpoint.data)
 
-                            # Save notes to DB with advisory lock
-                            _save_notes_to_db(notes)
-
                         except BrowserCrashError as e:
                             logger.error(
-                                f"Browser crashed scraping {type_code}: {e} "
+                                f"Browser crashed scraping {type_code_full}: {e} "
                                 f"— restarting browser"
                             )
                             need_restart = True
                             break
                         except Exception as e:
                             logger.error(
-                                f"Failed to scrape {type_code}: {e}", exc_info=True
+                                f"Failed to scrape {type_code_full}: {e}", exc_info=True
                             )
 
                         cars_this_session += 1

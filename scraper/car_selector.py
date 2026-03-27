@@ -1,18 +1,21 @@
 """
 car_selector.py
 
-Builds the list of cars to scrape.
+Direct-navigation car lookup for the 5-scraper architecture.
 
-Full mode (default):
-  - EGY market only — skips any model not available in EGY
-  - ALL production dates per model (not just the first)
-  - ALL engines per production date
-  - 4-char prefix dedup: if type_code_full[:4] (e.g. "VA99") has already been
-    scraped (or seen in this run), skip that type code silently
+Each scraper loads its car list from the DB (scraper_car_lists table).
+Every car entry already knows: code, series, model, body, engine, market, prod_month.
 
-Sample mode (--sample flag / sample_mode=True):
-  - Only scrapes SAMPLE_SERIES / SAMPLE_MODEL with the same EGY logic
-  - Used for local testing
+find_car_type_code(page, car_info) navigates RealOEM dropdowns directly using
+these known values to obtain the full type_code_full URL parameter needed for
+parts scraping.  No full-site enumeration is performed.
+
+Market handling:
+  - EGY cars (market="EGY"): enumerate production months to find the one whose
+    type_code_full starts with the expected 4-char code.
+  - EUR cars (market="EUR"): prod_month is known; navigate directly.
+
+LHD is always preferred; falls back to first available steering.
 """
 
 import logging
@@ -22,123 +25,125 @@ from scraper import discovery as disc
 
 logger = logging.getLogger(__name__)
 
-# Hard-coded sample constants for test runs
-SAMPLE_SERIES = "E90"
-SAMPLE_MODEL  = "320i"
 
-
-def build_car_list(page, sample_mode=False, scraped_prefixes=None):
+def find_car_type_code(page, car_info: dict):
     """
-    Generator yielding car dicts ready for parts scraping.
+    Navigate RealOEM to find the type_code_full for a car from scraper_car_lists.
 
     Parameters
     ----------
-    page             : Playwright page
-    sample_mode      : If True, only yield SAMPLE_SERIES / SAMPLE_MODEL cars
-    scraped_prefixes : set of 4-char type-code prefixes already scraped.
-                       Cars whose prefix is in this set are silently skipped.
-                       The set is mutated in-place as new prefixes are yielded,
-                       so within-run duplicates are also avoided automatically.
+    page      : Playwright page
+    car_info  : dict with keys: code, series, model, body, engine, market, prod_month
 
-    Each yielded dict has keys:
-      series_value, series_label, body, model, market,
-      prod_month, engine, steering, type_code_full
+    Returns a full car dict (ready for parts scraping) with type_code_full set,
+    or None if the car could not be found.
     """
-    if scraped_prefixes is None:
-        scraped_prefixes = set()
+    code   = car_info["code"]        # 4-char prefix, e.g. "NA36"
+    series = car_info.get("series", "")
+    market = car_info.get("market", "EUR")
+    engine = car_info.get("engine", "")
+    body   = car_info.get("body", "")
 
-    all_series = disc.get_all_series(page)
+    # Clean model name (remove brand prefix if accidentally included)
+    model = car_info.get("model", "").strip()
+    for brand in ("BMW ", "MINI "):
+        if model.startswith(brand):
+            model = model[len(brand):]
 
-    for series_info in all_series:
-        series_val   = series_info["value"]
-        series_label = series_info["label"]
+    # Convert prod_month "YYYY-MM" → "YYYYMM" (RealOEM format)
+    prod_raw   = car_info.get("prod_month")
+    prod_known = prod_raw.replace("-", "") if prod_raw else None
 
-        if sample_mode and series_val != SAMPLE_SERIES:
-            continue
+    if not series:
+        logger.warning(f"Car {code}: no series value, skipping")
+        return None
 
-        logger.info(f"Processing series: {series_label}")
-        bodies = disc.get_bodies(page, series_val)
+    if is_diesel(model):
+        logger.info(f"Car {code}: diesel model {model!r}, skipping")
+        return None
 
-        for body_info in bodies:
-            body_val = body_info["value"]
-            models   = disc.get_models(page, series_val, body_val)
+    # ── Step 1: find the body dropdown value where our model appears ──────
+    target_body = _find_body_for_model(page, series, model, body)
+    if target_body is None:
+        logger.warning(f"Car {code}: model {model!r} not found in series {series}")
+        return None
 
-            for model_info in models:
-                model_val = model_info["value"]
+    # ── Step 2: get type_code_full ────────────────────────────────────────
+    if prod_known:
+        # EUR path: prod month is known — navigate directly
+        result = disc.get_type_code_full(
+            page, series, target_body, model, market, prod_known, engine
+        )
+        if result:
+            return _build_car_dict(car_info, result, series, target_body, model, prod_known)
+        logger.warning(
+            f"Car {code}: direct navigation failed "
+            f"({series}/{target_body}/{model}/{market}/{prod_known}/{engine})"
+        )
+        return None
 
-                if sample_mode and model_val != SAMPLE_MODEL:
-                    continue
+    else:
+        # EGY path: enumerate prod months, find the one matching our 4-char code
+        prods = disc.get_prods(page, series, target_body, model, market)
+        if not prods:
+            logger.warning(f"Car {code}: no prod months for {series}/{target_body}/{model}/{market}")
+            return None
 
-                if is_diesel(model_val):
-                    logger.debug(f"Skipping diesel: {model_val}")
-                    continue
+        for prod in prods:
+            engines = disc.get_engines(page, series, target_body, model, market, prod)
+            if engine and engine not in engines:
+                continue
+            result = disc.get_type_code_full(
+                page, series, target_body, model, market, prod, engine
+            )
+            if result:
+                tc = result["type_code_full"]
+                if tc[:4] == code:
+                    return _build_car_dict(car_info, result, series, target_body, model, prod)
 
-                # ---- EGY-only market ----
-                markets = disc.get_markets(page, series_val, body_val, model_val)
-                if "EGY" not in markets:
-                    logger.debug(
-                        f"No EGY market for {series_val}/{body_val}/{model_val}, skipping"
-                    )
-                    continue
+        logger.warning(
+            f"Car {code}: could not find matching type_code "
+            f"in {series}/{target_body}/{model}/{market} over {len(prods)} prod months"
+        )
+        return None
 
-                market = "EGY"
 
-                # ---- ALL production dates ----
-                prods = disc.get_prods(page, series_val, body_val, model_val, market)
-                if not prods:
-                    logger.warning(
-                        f"No prod dates for {series_val}/{body_val}/{model_val}/{market}"
-                    )
-                    continue
+# ── Helpers ───────────────────────────────────────────────────────────────
 
-                for prod in prods:
-                    # ---- ALL engines ----
-                    engines = disc.get_engines(
-                        page, series_val, body_val, model_val, market, prod
-                    )
-                    if not engines:
-                        logger.warning(
-                            f"No engines for "
-                            f"{series_val}/{body_val}/{model_val}/{market}/{prod}"
-                        )
-                        continue
+def _find_body_for_model(page, series: str, model: str, hint_body: str) -> str | None:
+    """
+    Return the body dropdown value for the given series where `model` appears.
+    Tries `hint_body` first (fast path), then searches all bodies.
+    """
+    # Fast path: body from car list matches directly
+    if hint_body:
+        models_in_hint = [m["value"] for m in disc.get_models(page, series, hint_body)]
+        if model in models_in_hint:
+            return hint_body
 
-                    for engine in engines:
-                        result = disc.get_type_code_full(
-                            page, series_val, body_val, model_val,
-                            market, prod, engine
-                        )
-                        if result is None:
-                            logger.warning(
-                                f"No type_code for "
-                                f"{series_val}/{body_val}/{model_val}/"
-                                f"{market}/{prod}/{engine}"
-                            )
-                            continue
+    # Search all available bodies
+    bodies = disc.get_bodies(page, series)
+    for body_info in bodies:
+        b = body_info["value"]
+        if b == hint_body:
+            continue  # already tried
+        models_in_b = [m["value"] for m in disc.get_models(page, series, b)]
+        if model in models_in_b:
+            return b
 
-                        tc_full = result["type_code_full"]
-                        prefix  = tc_full[:4]
+    return None
 
-                        # ---- 4-char prefix dedup ----
-                        if prefix in scraped_prefixes:
-                            logger.info(
-                                f"Skipping (prefix {prefix!r} already done): {tc_full}"
-                            )
-                            continue
 
-                        # Reserve this prefix so within-run duplicates are skipped
-                        scraped_prefixes.add(prefix)
-
-                        car = {
-                            "series_value":   series_val,
-                            "series_label":   series_label,
-                            "body":           body_val,
-                            "model":          model_val,
-                            "market":         market,
-                            "prod_month":     prod,
-                            "engine":         engine,
-                            "steering":       result["steering"],
-                            "type_code_full": tc_full,
-                        }
-                        logger.info(f"Car ready: {tc_full}")
-                        yield car
+def _build_car_dict(car_info: dict, result: dict,
+                    series_value: str, body: str, model: str, prod_month: str) -> dict:
+    return {
+        "type_code_full": result["type_code_full"],
+        "series_value":   series_value,
+        "series_label":   series_value,   # simplified; parts_scraper only needs type_code_full
+        "body":           body,
+        "model":          model,
+        "market":         car_info.get("market", "EUR"),
+        "prod_month":     prod_month,
+        "engine":         car_info.get("engine", ""),
+        "steering":       result.get("steering", ""),
+    }

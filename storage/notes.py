@@ -1,76 +1,43 @@
 """
-Notes writer - persists scraped parts data to PostgreSQL only.
+storage/notes.py
+Persists scraped parts data to PostgreSQL.
 
-DB is the sole source of truth. No local files are read or written.
-Data is flushed to DB after every group.
+Each car's data is stored under its 4-char prefix key in scraped_files:
+  filename = "VA99"
+  content  = {"VA99-EGY-05-2005-E90-BMW-320i": { ...car_data_with_groups... }}
 
-JSON structure (stored as text in scraped_files table):
-{
-  "meta": { "created_at": "...", "last_updated": "...", "version": "1.0" },
-  "data": {
-    "<series_value>": {
-      "series_label": "3' E90 (2004 - 2023)",
-      "models": {
-        "<type_code_full>": {
-          "series_value": "E90", "series_label": "...", "body": "Lim",
-          "model": "320i", "market": "EGY", "prod_month": "200805",
-          "engine": "N46", "steering": "Left hand drive",
-          "type_code_full": "VA99-EGY-05-2005-E90-BMW-320i",
-          "groups": {
-            "<mg>": {
-              "group_name": "ENGINE",
-              "subgroups": {
-                "<diagId>": {
-                  "subgroup_name": "SHORT ENGINE",
-                  "diagram_image_url": "https://...",
-                  "scraped_at": "...",
-                  "parts": [ { ... } ]
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
+A per-scraper resume file is also maintained so in-progress cars survive restarts:
+  filename = "scraper_1_notes"  (where 1 = SCRAPER_ID)
+
+No local files are written.
 """
 
 import json
-import os
 import logging
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-_FILENAME = "vFinal_notes.json"
-
 
 class NotesWriter:
     def __init__(self, filepath: str):
-        # filepath kept for filename derivation only — not written to
-        self._filename = os.path.basename(filepath)
+        # filepath param kept for API compatibility; not actually written to
+        from config import SCRAPER_ID
+        self._scraper_id = SCRAPER_ID
+        self._resume_key = f"scraper_{SCRAPER_ID}_notes"
         self.data = self._load()
 
-    # ------------------------------------------------------------------ #
-    # Public API                                                           #
-    # ------------------------------------------------------------------ #
+    # ── Public API ────────────────────────────────────────────────────────
 
     def save_subgroup(self, car, group, subgroup, diagram_url, parts, error=None):
-        """
-        Merge one subgroup's data into the in-memory tree only (no DB write).
-        Call flush() after all subgroups in a group are done to persist.
-        """
+        """Merge one subgroup's data into the in-memory tree. Call flush() to persist."""
         series_key = car["series_value"]
         type_key   = car["type_code_full"]
         mg_key     = group["mg"]
         diag_key   = subgroup["diagId"]
 
         if series_key not in self.data["data"]:
-            self.data["data"][series_key] = {
-                "series_label": car["series_label"],
-                "models": {},
-            }
+            self.data["data"][series_key] = {"series_label": car["series_label"], "models": {}}
 
         series_node = self.data["data"][series_key]
 
@@ -91,12 +58,7 @@ class NotesWriter:
         model_node = series_node["models"][type_key]
 
         if mg_key not in model_node["groups"]:
-            model_node["groups"][mg_key] = {
-                "group_name": group["name"],
-                "subgroups": {},
-            }
-
-        group_node = model_node["groups"][mg_key]
+            model_node["groups"][mg_key] = {"group_name": group["name"], "subgroups": {}}
 
         entry = {
             "subgroup_name":     subgroup["name"],
@@ -106,24 +68,17 @@ class NotesWriter:
         }
         if error:
             entry["scrape_error"] = str(error)
-        group_node["subgroups"][diag_key] = entry
+        model_node["groups"][mg_key]["subgroups"][diag_key] = entry
 
-        logger.debug(
-            f"Buffered subgroup {diag_key} ({len(parts)} parts) "
-            f"for {type_key} / group {mg_key}"
-        )
+        logger.debug(f"Buffered subgroup {diag_key} ({len(parts)} parts) for {type_key}/{mg_key}")
 
     def flush(self):
-        """Flush the in-memory tree to PostgreSQL. Call after every group."""
+        """Persist all in-memory data to PostgreSQL. Called after every group."""
         self._write_to_db()
         logger.info("Saved group to DB")
 
     def get_car_dict(self, type_code_full: str):
-        """
-        Extract a car metadata dict from already-saved notes data.
-        Used on startup to resume an in-progress car.
-        Returns None if the car has not been saved to notes yet.
-        """
+        """Return a car metadata dict from already-saved notes (used to resume in-progress cars)."""
         for series_data in self.data["data"].values():
             model = series_data.get("models", {}).get(type_code_full)
             if model:
@@ -140,36 +95,43 @@ class NotesWriter:
                 }
         return None
 
-    # ------------------------------------------------------------------ #
-    # Internal helpers                                                     #
-    # ------------------------------------------------------------------ #
+    # ── Internal helpers ──────────────────────────────────────────────────
 
     def _load(self) -> dict:
-        """Load from PostgreSQL only. Start fresh if not found."""
+        """Load per-scraper resume data from DB. Start fresh if not found."""
         try:
             from storage.db import get_file_content
-            content = get_file_content(self._filename)
+            content = get_file_content(self._resume_key)
             if content:
                 data = json.loads(content)
-                logger.info("Loaded notes from PostgreSQL")
+                logger.info(f"Loaded notes from DB ({self._resume_key})")
                 return data
         except Exception as e:
             logger.warning(f"Could not load notes from DB: {e}")
-        logger.info("Starting fresh notes (nothing in DB)")
+        logger.info("Starting fresh notes")
         return {
             "meta": {
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at":   datetime.utcnow().isoformat(),
                 "last_updated": None,
-                "version": "1.0",
+                "version":      "1.0",
             },
             "data": {},
         }
 
     def _write_to_db(self):
+        """
+        Save each type_code's data under its 4-char prefix key (e.g. 'NA36').
+        Also save the full scraper notes for resume capability.
+        """
         self.data["meta"]["last_updated"] = datetime.utcnow().isoformat()
-        try:
-            from storage.db import sync_file
-            content = json.dumps(self.data, indent=2, ensure_ascii=False)
-            sync_file(self._filename, content)
-        except Exception as e:
-            logger.error(f"Failed to write notes to DB: {e}")
+        from storage.db import sync_file
+
+        # 1. Per-prefix saves (each scraper writes to its own unique prefix keys)
+        for series_data in self.data["data"].values():
+            for tc, car_data in series_data.get("models", {}).items():
+                prefix = tc[:4]
+                sync_file(prefix, json.dumps({tc: car_data}, ensure_ascii=False))
+
+        # 2. Scraper-specific resume file
+        content = json.dumps(self.data, ensure_ascii=False)
+        sync_file(self._resume_key, content)

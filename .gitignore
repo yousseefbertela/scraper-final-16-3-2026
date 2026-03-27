@@ -1,44 +1,28 @@
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Virtual environments
-venv/
-.venv/
-env/
-
-# Debug / temp files
-data/debug*.html
-data/debug*.txt
-data/page_*.html
-data/scraper.log
-
-# Data files — managed by PostgreSQL, never commit
-# (Railway always restores from DB on startup)
-data/*.json
-data/*.csv
-
-# Playwright browsers (installed separately)
-playwright/
-
-# IDE
-.vscode/
-.idea/
-
-# Temp scripts
-python
-
-# Environment secrets — never commit!
+# Credentials — NEVER commit these
 .env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
 
 # Node
 frontend-database/node_modules/
-frontend-database/bmw-parts-export*.json
+node_modules/
 
-# Misc local files
-egy_cars_only.json
-prompt-explanation.md
-py
+# Scraper runtime data (stored in DB, not locally)
+data/
+*.json
+!.env.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
