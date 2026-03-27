@@ -1,3 +1,6 @@
+// Load .env from parent directory (for local development)
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
 // Allow self-signed DO managed database certificate (safe for trusted DB endpoint)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
