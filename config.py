@@ -7,6 +7,9 @@ try:
 except ImportError:
     pass
 
+# --- Scraper identity (1-5); each instance reads its own car list from DB ---
+SCRAPER_ID = int(os.environ.get("SCRAPER_ID", "1"))
+
 BASE_URL   = "https://www.realoem.com"
 SELECT_URL = f"{BASE_URL}/bmw/enUS/select"
 
@@ -23,7 +26,7 @@ RETRY_DELAY      = (8,  20)     # On error / rate-limit
 MAX_RETRIES = 3
 
 # --- Market ---
-EGY_ONLY = True           # Only scrape EGY market; skip all others
+EGY_ONLY = False          # Multi-market: each scraper targets markets per its car list
 
 # --- Output paths (system temp dir -- nothing written to project folder) ---
 DATA_DIR             = os.path.join(tempfile.gettempdir(), "bmw_scraper_data")
@@ -33,8 +36,17 @@ LOG_FILE             = os.path.join(DATA_DIR, "scraper.log")
 PROGRESS_FILE        = os.path.join(DATA_DIR, "scraped_progress.csv")
 CAR_LIST_CACHE_FILE  = os.path.join(DATA_DIR, "car_list.json")
 
-# --- PostgreSQL (file-mirror storage) ---
+# --- DigitalOcean PostgreSQL (primary storage for 5-scraper architecture) ---
+DO_DB_HOST     = "db-postgresql-fra1-49814-do-user-35023198-0.m.db.ondigitalocean.com"
+DO_DB_PORT     = 25060
+DO_DB_NAME     = "defaultdb"
+DO_DB_USER     = "doadmin"
+DO_DB_PASSWORD = "AVNS_-XlC2DQ9aUXXALj8pp_"
+DO_DB_SSLMODE  = "require"
+DO_ADVISORY_LOCK_KEY = 42
+
+# Legacy Railway DATABASE_URL (kept for backward compatibility / frontend)
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:kfljOWQPmNhIgUeyngUywqHNBreAIrGf@gondola.proxy.rlwy.net:36301/railway"
+    f"postgresql://{DO_DB_USER}:{DO_DB_PASSWORD}@{DO_DB_HOST}:{DO_DB_PORT}/{DO_DB_NAME}?sslmode={DO_DB_SSLMODE}"
 )

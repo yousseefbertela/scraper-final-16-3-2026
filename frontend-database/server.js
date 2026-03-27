@@ -6,7 +6,7 @@ const app = express();
 const PORT = 3000;
 
 const pool = new Pool({
-  connectionString: 'postgresql://postgres:kfljOWQPmNhIgUeyngUywqHNBreAIrGf@gondola.proxy.rlwy.net:36301/railway',
+  connectionString: 'postgresql://doadmin:AVNS_-XlC2DQ9aUXXALj8pp_@db-postgresql-fra1-49814-do-user-35023198-0.m.db.ondigitalocean.com:25060/defaultdb?sslmode=require',
   ssl: { rejectUnauthorized: false }
 });
 
