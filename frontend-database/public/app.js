@@ -289,42 +289,82 @@ async function loadTargetList() {
 }
 
 function renderTargetList(data) {
-  const stats = $('target-stat-grid');
-  const remaining = data.total - data.scraped;
-  stats.innerHTML = `
-    <div class="stat-card"><div class="stat-value">${data.total}</div><div class="stat-label">Type Codes</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:var(--green)">${data.scraped}</div><div class="stat-label">Scraped</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:var(--yellow)">${remaining}</div><div class="stat-label">Remaining</div></div>
-    <div class="stat-card"><div class="stat-value">${data.total ? Math.round((data.scraped/data.total)*100) : 0}%</div><div class="stat-label">Progress</div></div>`;
+  const scrapers = data.scrapers || [];
+  const totalAll   = scrapers.reduce((s, sc) => s + sc.total,   0);
+  const scrapedAll = scrapers.reduce((s, sc) => s + sc.scraped, 0);
+  const remaining  = totalAll - scrapedAll;
 
-  $('target-section-title').textContent = `All Type Codes (${data.total})`;
+  const stats = $('target-stat-grid');
+  stats.innerHTML = `
+    <div class="stat-card"><div class="stat-value">${totalAll}</div><div class="stat-label">Total Cars</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--green)">${scrapedAll}</div><div class="stat-label">Scraped</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--yellow)">${remaining}</div><div class="stat-label">Remaining</div></div>
+    <div class="stat-card"><div class="stat-value">${totalAll ? Math.round((scrapedAll/totalAll)*100) : 0}%</div><div class="stat-label">Progress</div></div>`;
+
+  $('target-section-title').textContent = `All Scrapers (${scrapers.length})`;
 
   const wrap = $('target-content');
   wrap.innerHTML = '';
-  const tableWrap = el('div', 'target-table-wrap');
-  const table = document.createElement('table');
-  table.className = 'target-table';
-  const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>#</th><th>Prefix</th><th>Model</th><th>Series</th><th>Body</th><th>Engine</th><th>Variants</th><th>Status</th></tr>';
-  table.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  data.groups.forEach((g, i) => {
-    const tr = document.createElement('tr');
-    tr.className = g.scraped ? 'row-done' : '';
-    tr.innerHTML = `
-      <td style="color:var(--text3);font-size:12px">${i+1}</td>
-      <td><code class="type-prefix">${g.prefix}</code></td>
-      <td><strong>BMW ${g.model}</strong></td>
-      <td style="color:var(--text3);font-size:12px">${g.series_label}</td>
-      <td style="color:var(--text3)">${g.body || '--'}</td>
-      <td>${g.engine || '--'}</td>
-      <td style="color:var(--text3)">${g.variant_count}</td>
-      <td><span class="status-badge ${g.scraped ? 'badge-done' : 'badge-pending'}">${g.scraped ? '✓ Scraped' : 'Pending'}</span></td>`;
-    tbody.appendChild(tr);
+
+  function buildTable(cars) {
+    const tableWrap = el('div', 'target-table-wrap');
+    const table = document.createElement('table');
+    table.className = 'target-table';
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>#</th><th>Code</th><th>Model</th><th>Series</th><th>Market</th><th>Engine</th><th>Status</th></tr>';
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    cars.forEach(c => {
+      const tr = document.createElement('tr');
+      tr.className = c.scraped ? 'row-done' : '';
+      tr.innerHTML = `
+        <td style="color:var(--text3);font-size:12px">${c.num}</td>
+        <td><code class="type-prefix">${c.code}</code></td>
+        <td><strong>${c.model}</strong></td>
+        <td style="color:var(--text3);font-size:12px">${c.series || '--'}</td>
+        <td>${c.market || '--'}</td>
+        <td>${c.engine || '--'}</td>
+        <td><span class="status-badge ${c.scraped ? 'badge-done' : 'badge-pending'}">${c.scraped ? '✓ Scraped' : 'Pending'}</span></td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    return tableWrap;
+  }
+
+  // Per-scraper sections
+  scrapers.forEach(sc => {
+    const section = el('div', 'scraper-section');
+    const header = el('div', 'scraper-section-header');
+    header.innerHTML = `
+      <span class="scraper-section-title">${sc.label || 'Scraper ' + sc.scraper_id}</span>
+      <span class="scraper-section-stats">
+        <span style="color:var(--green)">${sc.scraped} scraped</span>
+        &nbsp;/&nbsp;${sc.total} total
+        <span class="status-badge ${sc.scraped === sc.total && sc.total > 0 ? 'badge-done' : 'badge-pending'}" style="margin-left:10px">
+          ${sc.scraped === sc.total && sc.total > 0 ? '✓ Complete' : sc.scraped + ' / ' + sc.total}
+        </span>
+      </span>`;
+    section.appendChild(header);
+    section.appendChild(buildTable(sc.cars));
+    wrap.appendChild(section);
   });
-  table.appendChild(tbody);
-  tableWrap.appendChild(table);
-  wrap.appendChild(tableWrap);
+
+  // Total summary row
+  const summary = el('div', 'scraper-section scraper-section-summary');
+  summary.innerHTML = `
+    <div class="scraper-section-header">
+      <span class="scraper-section-title">Total</span>
+      <span class="scraper-section-stats">
+        <span style="color:var(--green)">${scrapedAll} scraped</span>
+        &nbsp;/&nbsp;${totalAll} total
+        &nbsp;·&nbsp;
+        <span style="color:var(--yellow)">${remaining} remaining</span>
+        &nbsp;·&nbsp;
+        <strong>${totalAll ? Math.round((scrapedAll/totalAll)*100) : 0}%</strong>
+      </span>
+    </div>`;
+  wrap.appendChild(summary);
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ node_modules/
 data/
 *.json
 !.env.example
+!frontend-database/package.json
+!frontend-database/package-lock.json
 
 # Logs
 *.log

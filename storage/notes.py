@@ -75,6 +75,7 @@ class NotesWriter:
     def flush(self):
         """Persist all in-memory data to PostgreSQL. Called after every group."""
         self._write_to_db()
+        self._update_summary()
         logger.info("Saved group to DB")
 
     def get_car_dict(self, type_code_full: str):
@@ -117,6 +118,43 @@ class NotesWriter:
             },
             "data": {},
         }
+
+    def _update_summary(self):
+        """
+        Merge this scraper's car counts into the shared _summary key.
+        _summary = { type_code_full: {series_label, model, market, body, engine,
+                                      prod_month, parts_count, groups_count, subgroups_count} }
+        Uses advisory lock so concurrent scrapers don't overwrite each other.
+        """
+        from storage.db import get_file_content, save_with_lock
+        try:
+            existing = get_file_content("_summary")
+            summary = json.loads(existing) if existing else {}
+
+            for series_data in self.data["data"].values():
+                for tc, car_data in series_data.get("models", {}).items():
+                    parts = groups_c = subgroups_c = 0
+                    for g in car_data.get("groups", {}).values():
+                        groups_c += 1
+                        for sg in g.get("subgroups", {}).values():
+                            subgroups_c += 1
+                            parts += len(sg.get("parts", []))
+                    summary[tc] = {
+                        "series_label":    car_data.get("series_label") or car_data.get("series_value", ""),
+                        "model":           car_data.get("model", ""),
+                        "market":          car_data.get("market", ""),
+                        "body":            car_data.get("body", ""),
+                        "engine":          car_data.get("engine", ""),
+                        "prod_month":      car_data.get("prod_month", ""),
+                        "parts_count":     parts,
+                        "groups_count":    groups_c,
+                        "subgroups_count": subgroups_c,
+                    }
+
+            save_with_lock("_summary", json.dumps(summary, ensure_ascii=False))
+            logger.debug(f"Updated _summary ({len(summary)} total cars)")
+        except Exception as e:
+            logger.warning(f"Failed to update _summary: {e}")
 
     def _write_to_db(self):
         """

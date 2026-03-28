@@ -6,9 +6,14 @@ venv/
 .venv/
 __pycache__/
 *.pyc
-data/debug*.html
-data/debug*.txt
-data/page_*.html
-data/scraper.log
+*.log
+data/
 .vscode/
 .idea/
+
+# Frontend (scrapers don't need this — deploy separately)
+frontend-database/
+
+# Large local data folders
+old-data-alreadyscraped-cars/
+car-list-27,3-needstobescraped/

@@ -157,3 +157,10 @@ tbody td:first-child { color: var(--text); font-family: monospace; font-size: 12
 .status-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 4px; white-space: nowrap; }
 .badge-done { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.35); color: var(--green); }
 .badge-pending { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: var(--yellow); }
+.scraper-section { margin-bottom: 28px; }
+.scraper-section-summary { margin-top: 8px; }
+.scraper-section-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px 8px 0 0; margin-bottom: 0; }
+.scraper-section-summary .scraper-section-header { border-radius: 8px; background: var(--bg2); }
+.scraper-section-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.scraper-section-stats { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 4px; }
+.scraper-section .target-table-wrap { border-radius: 0 0 8px 8px; border-top: none; }

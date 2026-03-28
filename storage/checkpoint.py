@@ -107,13 +107,13 @@ class CheckpointManager:
                 self.data["cars"][key]["completed_subgroups"] = {}
 
     def _load(self) -> dict:
-        """Load from PostgreSQL only. Start fresh if not found."""
+        """Load per-scraper checkpoint from scraper_checkpoints table."""
         try:
-            from storage.db import get_file_content
-            content = get_file_content(self._filename)
-            if content:
-                data = json.loads(content)
-                logger.info("Loaded checkpoint from PostgreSQL")
+            from config import SCRAPER_ID
+            from storage.db import load_checkpoint
+            data = load_checkpoint(SCRAPER_ID)
+            if data:
+                logger.info(f"Loaded checkpoint from DB (scraper {SCRAPER_ID})")
                 return data
         except Exception as e:
             logger.warning(f"Could not load checkpoint from DB: {e}")
@@ -121,10 +121,11 @@ class CheckpointManager:
         return {"last_updated": None, "cars": {}}
 
     def _save(self):
+        """Save per-scraper checkpoint to scraper_checkpoints table."""
         self.data["last_updated"] = datetime.utcnow().isoformat()
         try:
-            from storage.db import sync_file
-            content = json.dumps(self.data, indent=2, ensure_ascii=False)
-            sync_file(self._filename, content)
+            from config import SCRAPER_ID
+            from storage.db import save_checkpoint
+            save_checkpoint(SCRAPER_ID, self.data)
         except Exception as e:
             logger.error(f"Failed to save checkpoint to DB: {e}")

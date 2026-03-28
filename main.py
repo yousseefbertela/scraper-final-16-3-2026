@@ -1,7 +1,6 @@
 
 import argparse
 import gc
-import json
 import logging
 import sys
 
@@ -44,30 +43,6 @@ def setup_logging():
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-
-# ── Checkpoint helpers (DB-backed) ────────────────────────────────────────────
-
-def _load_checkpoint_data() -> dict:
-    """Load checkpoint from DO DB for this SCRAPER_ID; fall back to local file."""
-    from storage import db
-    data = db.load_checkpoint(SCRAPER_ID)
-    if data:
-        logging.getLogger("main").info(f"Checkpoint loaded from DB (scraper {SCRAPER_ID})")
-        return data
-    try:
-        with open(CHECKPOINT_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        logging.getLogger("main").warning(f"Could not read local checkpoint: {e}")
-        return {}
-
-
-def _save_checkpoint_data(data: dict):
-    """Persist checkpoint to DO DB for this SCRAPER_ID."""
-    from storage import db
-    db.save_checkpoint(SCRAPER_ID, data)
 
 
 # ── Car list helpers ──────────────────────────────────────────────────────────
@@ -149,11 +124,8 @@ def main():
     notes      = NotesWriter(VFINAL_NOTES_FILE)
     progress   = ProgressWriter(PROGRESS_FILE)
 
-    # --- Load checkpoint from DB ---
-    cp_data    = _load_checkpoint_data()
+    # --- Load checkpoint from DB (per-scraper, handled inside CheckpointManager) ---
     checkpoint = CheckpointManager(CHECKPOINT_FILE)
-    if cp_data:
-        checkpoint.data = cp_data
 
     start_virtual_display()
 
@@ -209,7 +181,7 @@ def main():
                                 type_code_full = car["type_code_full"]
                                 # Cache for future sessions
                                 type_code_map[code] = type_code_full
-                                _save_checkpoint_data(checkpoint.data)
+                                checkpoint._save()
                                 logger.info(f"Found type_code: {type_code_full}")
                             else:
                                 # Reconstruct car dict from cached type_code + car_info
@@ -241,9 +213,6 @@ def main():
                             )
                             progress.mark_completed(type_code_full, parts_count)
                             logger.info(f"Finished {type_code_full}: {parts_count} parts")
-
-                            # Persist checkpoint to DB after each completed car
-                            _save_checkpoint_data(checkpoint.data)
 
                         except BrowserCrashError as e:
                             logger.error(
