@@ -210,7 +210,7 @@ def safe_goto(page: Page, url: str, retries: int = 3):
             logger.debug(f"Navigating to {url} (attempt {attempt})")
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             try:
-                page.wait_for_load_state("networkidle", timeout=4_000)
+                page.wait_for_load_state("networkidle", timeout=1_000)
             except Exception:
                 pass
             wait_for_no_cloudflare(page)

@@ -1,9 +1,6 @@
 // Load .env from parent directory (for local development)
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-// Allow self-signed DO managed database certificate (safe for trusted DB endpoint)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 const express = require('express');
 const { Pool } = require('pg');
 const path = require('path');
@@ -11,7 +8,11 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// ssl: rejectUnauthorized false needed for DO managed DB self-signed cert
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
