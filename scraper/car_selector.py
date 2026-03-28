@@ -62,13 +62,6 @@ def find_car_type_code(page, car_info: dict):
         logger.info(f"Car {code}: diesel model {model!r}, skipping")
         return None
 
-    # ── Fast path: construct type_code_full directly (no dropdown navigation) ──
-    # Works when prod_month is known (all EUR cars + any EGY with known prod_month)
-    if prod_known and len(prod_known) == 6:
-        tc = _try_construct_type_code(page, code, series, model, market, prod_known)
-        if tc:
-            return _build_car_dict(car_info, {"type_code_full": tc, "steering": ""}, series, body, model, prod_known)
-
     # ── Step 1: find the body dropdown value where our model appears ──────
     target_body = _find_body_for_model(page, series, model, body)
     if target_body is None:
