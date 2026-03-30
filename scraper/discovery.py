@@ -23,6 +23,21 @@ from config import SELECT_URL, ACTION_DELAY
 
 logger = logging.getLogger(__name__)
 
+# ------------------------------------------------------------------ #
+# Classic-catalog detection                                           #
+# ------------------------------------------------------------------ #
+
+# These BMW series live in RealOEM's "Classic" catalog, not "Current".
+_CLASSIC_SERIES = frozenset({
+    "E21", "E23", "E24", "E28", "E30", "E31", "E32", "E34",
+    "E36", "E38", "E39", "E46", "E52", "E53",
+})
+
+
+def _catalog_for(series: str) -> str:
+    """Return 'Classic' if this series lives in the Classic catalog, else ''."""
+    return "Classic" if series in _CLASSIC_SERIES else ""
+
 
 # ------------------------------------------------------------------ #
 # Internal helpers                                                     #
@@ -89,6 +104,9 @@ def _ajax_get_type_code(page, series, body, model, market, prod, engine):
     reload), so we use page.expect_navigation() to wait for the reload before
     proceeding to the next dropdown.
 
+    For Classic-catalog series (E46, E36, etc.), selects the catalog dropdown
+    first before navigating the rest of the form.
+
     Returns type_code_full string or None.
     """
     safe_goto(page, SELECT_URL)
@@ -112,6 +130,32 @@ def _ajax_get_type_code(page, series, body, model, market, prod, engine):
         except Exception as e:
             logger.warning(f"AJAX fallback: error selecting {value!r} in {selector}: {e}")
             return False
+
+    # --- Classic catalog selection (E46, E36, etc.) ---
+    catalog = _catalog_for(series)
+    if catalog:
+        logger.info(f"Series {series} is Classic catalog — selecting catalog dropdown first")
+        try:
+            cat_sel = page.locator("select[name='catalog']")
+            cat_sel.wait_for(state="visible", timeout=6000)
+            # Find the Classic option by label (case-insensitive)
+            opts = page.locator("select[name='catalog'] option").all()
+            classic_val = None
+            for opt in opts:
+                label = (opt.inner_text() or "").strip().lower()
+                val   = (opt.get_attribute("value") or "").strip()
+                if "classic" in label or "classic" in val.lower():
+                    classic_val = val
+                    break
+            if classic_val is not None:
+                with page.expect_navigation(wait_until="domcontentloaded", timeout=15000):
+                    cat_sel.select_option(value=classic_val)
+                time.sleep(1.5)
+                logger.info(f"Catalog set to Classic (value={classic_val!r})")
+            else:
+                logger.warning(f"Classic option not found in catalog dropdown for series {series}")
+        except Exception as e:
+            logger.warning(f"Could not select Classic catalog for series {series}: {e}")
 
     if not sel_nav("series",  series):  return None
     if not sel_nav("body",    body):    return None
@@ -163,7 +207,11 @@ def get_all_series(page):
 
 def get_bodies(page, series):
     """Return body type options for the given series."""
-    soup = _nav(page, series=series)
+    params = {"series": series}
+    cat = _catalog_for(series)
+    if cat:
+        params["catalog"] = cat
+    soup = _nav(page, **params)
     bodies = _read_select(soup, "body")
     logger.debug(f"Series {series}: {len(bodies)} bodies")
     return bodies
@@ -171,7 +219,11 @@ def get_bodies(page, series):
 
 def get_models(page, series, body):
     """Return model options for series + body."""
-    soup = _nav(page, series=series, body=body)
+    params = {"series": series, "body": body}
+    cat = _catalog_for(series)
+    if cat:
+        params["catalog"] = cat
+    soup = _nav(page, **params)
     models = _read_select(soup, "model")
     logger.debug(f"{series}/{body}: {len(models)} models")
     return models
@@ -179,7 +231,11 @@ def get_models(page, series, body):
 
 def get_markets(page, series, body, model):
     """Return available market value-strings for series+body+model."""
-    soup = _nav(page, series=series, body=body, model=model)
+    params = {"series": series, "body": body, "model": model}
+    cat = _catalog_for(series)
+    if cat:
+        params["catalog"] = cat
+    soup = _nav(page, **params)
     markets = [o["value"] for o in _read_select(soup, "market")]
     logger.debug(f"{series}/{body}/{model} -> markets: {markets}")
     return markets
@@ -187,7 +243,11 @@ def get_markets(page, series, body, model):
 
 def get_prods(page, series, body, model, market):
     """Return production date values (YYYYMM) for given config."""
-    soup = _nav(page, series=series, body=body, model=model, market=market)
+    params = {"series": series, "body": body, "model": model, "market": market}
+    cat = _catalog_for(series)
+    if cat:
+        params["catalog"] = cat
+    soup = _nav(page, **params)
     prods = [o["value"] for o in _read_select(soup, "prod")]
     logger.debug(f"{series}/{body}/{model}/{market} -> prods: {prods[:3]}")
     return prods
@@ -195,8 +255,12 @@ def get_prods(page, series, body, model, market):
 
 def get_engines(page, series, body, model, market, prod):
     """Return all available engine codes."""
-    soup = _nav(page, series=series, body=body, model=model,
-                market=market, prod=prod)
+    params = {"series": series, "body": body, "model": model,
+              "market": market, "prod": prod}
+    cat = _catalog_for(series)
+    if cat:
+        params["catalog"] = cat
+    soup = _nav(page, **params)
     engines = [o["value"] for o in _read_select(soup, "engine")]
     logger.debug(f"Engines: {engines}")
     return engines
@@ -211,8 +275,12 @@ def get_type_code_full(page, series, body, model, market, prod, engine):
 
     Returns dict {type_code_full, steering} or None on failure.
     """
-    soup = _nav(page, series=series, body=body, model=model,
-                market=market, prod=prod, engine=engine)
+    params = {"series": series, "body": body, "model": model,
+              "market": market, "prod": prod, "engine": engine}
+    cat = _catalog_for(series)
+    if cat:
+        params["catalog"] = cat
+    soup = _nav(page, **params)
 
     # Happy path: Browse Parts link is already present
     tc = _extract_type_code(soup)
@@ -230,9 +298,7 @@ def get_type_code_full(page, series, body, model, market, prod, engine):
         )
         logger.debug(f"Steering choices: {[s['label'] for s in steerings]} -> selecting: {chosen['label']}")
 
-        soup2 = _nav(page, series=series, body=body, model=model,
-                     market=market, prod=prod, engine=engine,
-                     steering=chosen["value"])
+        soup2 = _nav(page, **{**params, "steering": chosen["value"]})
 
         tc = _extract_type_code(soup2)
         if tc:

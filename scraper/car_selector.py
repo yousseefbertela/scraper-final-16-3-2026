@@ -68,22 +68,47 @@ def find_car_type_code(page, car_info: dict):
         logger.warning(f"Car {code}: model {model!r} not found in series {series}")
         return None
 
-    # ── Step 2: get type_code_full ────────────────────────────────────────
+    # ── Step 2: navigate dropdowns exactly like a human ──────────────────
+    #
+    # EUR cars (prod_month known): go directly to exact prod_month via dropdowns.
+    # EGY cars (no prod_month):    enumerate all prod months, match by 4-char prefix.
+    #
+    # For EUR: use _ajax_get_type_code directly — no URL-param guessing.
+    # If type_code prefix doesn't match our code → skip car.
+
     if prod_known:
-        # EUR path: prod month is known — navigate directly
-        result = disc.get_type_code_full(
-            page, series, target_body, model, market, prod_known, engine
+        # EUR path: step-by-step dropdown navigation with known prod_month.
+        # If the exact prod_month isn't in the dropdown, use the closest available
+        # prod_month that is ≤ prod_known (i.e. the car was produced by that date).
+        prod_to_use = _resolve_prod_month(
+            page, code, series, target_body, model, market, prod_known
         )
-        if result:
-            return _build_car_dict(car_info, result, series, target_body, model, prod_known)
-        logger.warning(
-            f"Car {code}: direct navigation failed "
-            f"({series}/{target_body}/{model}/{market}/{prod_known}/{engine})"
+        if prod_to_use is None:
+            logger.warning(
+                f"Car {code}: no usable prod_month found in dropdown "
+                f"({series}/{target_body}/{model}/{market}) — skipping"
+            )
+            return None
+
+        tc = disc._ajax_get_type_code(
+            page, series, target_body, model, market, prod_to_use, engine
         )
-        return None
+        if not tc:
+            logger.warning(
+                f"Car {code}: step-by-step navigation failed "
+                f"({series}/{target_body}/{model}/{market}/{prod_to_use}/{engine}) — skipping"
+            )
+            return None
+        if tc[:4] != code:
+            logger.warning(
+                f"Car {code}: type_code prefix mismatch — got {tc[:4]}, expected {code} — skipping"
+            )
+            return None
+        logger.info(f"Car {code}: found via step-by-step → {tc}")
+        return _build_car_dict(car_info, {"type_code_full": tc, "steering": ""}, series, target_body, model, prod_to_use)
 
     else:
-        # EGY path: enumerate prod months, find the one matching our 4-char code
+        # EGY path: enumerate prod months, match by 4-char prefix
         prods = disc.get_prods(page, series, target_body, model, market)
         if not prods:
             logger.warning(f"Car {code}: no prod months for {series}/{target_body}/{model}/{market}")
@@ -93,22 +118,58 @@ def find_car_type_code(page, car_info: dict):
             engines = disc.get_engines(page, series, target_body, model, market, prod)
             if engine and engine not in engines:
                 continue
-            result = disc.get_type_code_full(
+            tc = disc._ajax_get_type_code(
                 page, series, target_body, model, market, prod, engine
             )
-            if result:
-                tc = result["type_code_full"]
-                if tc[:4] == code:
-                    return _build_car_dict(car_info, result, series, target_body, model, prod)
+            if tc and tc[:4] == code:
+                logger.info(f"Car {code}: found via enumeration → {tc}")
+                return _build_car_dict(car_info, {"type_code_full": tc, "steering": ""}, series, target_body, model, prod)
 
         logger.warning(
-            f"Car {code}: could not find matching type_code "
-            f"in {series}/{target_body}/{model}/{market} over {len(prods)} prod months"
+            f"Car {code}: no matching type_code found in "
+            f"{series}/{target_body}/{model}/{market} over {len(prods)} prod months — skipping"
         )
         return None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+def _resolve_prod_month(page, code: str, series: str, body: str, model: str,
+                        market: str, prod_known: str) -> str | None:
+    """
+    Return the best prod_month to use for navigation.
+
+    1. If prod_known exists exactly in the dropdown → use it directly.
+    2. Otherwise fetch the available list and pick the closest prod ≤ prod_known
+       (the latest production date that is at or before the car's known month).
+    3. If no prod ≤ prod_known exists, use the earliest available prod instead.
+    4. Returns None if no prods are available at all.
+    """
+    available = disc.get_prods(page, series, body, model, market)
+    if not available:
+        return None
+
+    if prod_known in available:
+        return prod_known
+
+    # Find closest prod <= prod_known (same or earlier)
+    earlier = [p for p in available if p <= prod_known]
+    if earlier:
+        closest = max(earlier)
+        logger.info(
+            f"Car {code}: prod_month {prod_known} not in dropdown "
+            f"— using closest earlier: {closest}"
+        )
+        return closest
+
+    # All available prods are after prod_known; use the earliest one
+    closest = min(available)
+    logger.info(
+        f"Car {code}: prod_month {prod_known} not in dropdown and no earlier option "
+        f"— using earliest available: {closest}"
+    )
+    return closest
+
 
 def _try_construct_type_code(page, code: str, series: str, model: str,
                               market: str, prod_known: str) -> str | None:
