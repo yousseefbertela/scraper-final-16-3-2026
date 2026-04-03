@@ -1,245 +1,430 @@
 """
-car_selector.py
+car_selector.py  -  Target-list driven RealOEM navigation (new architecture)
 
-Direct-navigation car lookup for the 5-scraper architecture.
-
-Each scraper loads its car list from the DB (scraper_car_lists table).
-Every car entry already knows: code, series, model, body, engine, market, prod_month.
-
-find_car_type_code(page, car_info) navigates RealOEM dropdowns directly using
-these known values to obtain the full type_code_full URL parameter needed for
-parts scraping.  No full-site enumeration is performed.
-
-Market handling:
-  - EGY cars (market="EGY"): enumerate production months to find the one whose
-    type_code_full starts with the expected 4-char code.
-  - EUR cars (market="EUR"): prod_month is known; navigate directly.
-
-LHD is always preferred; falls back to first available steering.
+Navigation flow per car:
+  1. Read core fields  : code, series, model, market, engine
+  2. Read custom cols  : catalog, series_label, body, prod_month, steering
+  3. Navigate RealOEM  :
+       a. Load SELECT_URL with ?archive=1 for Classic, default for Current
+       b. Select series    -> match series_label TEXT in dropdown (not value)
+       c. Select body      -> directly from custom 'body' col
+       d. Select model     -> from core field
+       e. Select market    -> from core field
+       f. Select prod_month-> EUR: try stored prod then expand outward until
+                             engine is in dropdown | EGY: first dropdown option
+       g. Select engine    -> from core field
+       h. Select steering  -> prefer custom col, else Left-hand drive, else first
+  4. Extract type_code_full
+  5. Verify prefix == code  ->  scrape  |  mismatch  ->  skip + warn
 """
 
 import logging
+import time
+import unicodedata
 
+from bs4 import BeautifulSoup
+
+from scraper.browser import safe_goto
 from scraper.filters import is_diesel
-from scraper import discovery as disc
+from scraper.discovery import _extract_type_code
+from config import SELECT_URL
 
 logger = logging.getLogger(__name__)
 
+# -- Custom column IDs (from DB _columns row) ----------------------------------
+COL_SERIES_LABEL = "col_1775163870194_93n2x"
+COL_BODY         = "col_1775163882980_nr3xh"
+COL_STEERING     = "col_1775163897641_k0d2n"
+COL_PROD_MONTH   = "col_1775163979435_jilnc"
+COL_BRAND        = "col_1775163999384_4jryt"
+COL_CATALOG      = "col_1775164005280_2rqu5"
+
+
+# -- Public entry point --------------------------------------------------------
 
 def find_car_type_code(page, car_info: dict):
     """
-    Navigate RealOEM to find the type_code_full for a car from scraper_car_lists.
+    Navigate RealOEM using target-list data to find type_code_full.
 
     Parameters
     ----------
-    page      : Playwright page
-    car_info  : dict with keys: code, series, model, body, engine, market, prod_month
+    page     : Playwright page
+    car_info : dict from scraper_car_lists (includes 'custom' sub-dict)
 
-    Returns a full car dict (ready for parts scraping) with type_code_full set,
-    or None if the car could not be found.
+    Returns full car dict with type_code_full set, or None on failure.
     """
-    code   = car_info["code"]        # 4-char prefix, e.g. "NA36"
-    series = car_info.get("series", "")
+    code   = car_info.get("code", "")
     market = car_info.get("market", "EUR")
     engine = car_info.get("engine", "")
-    body   = car_info.get("body", "")
 
-    # Clean model name (remove brand prefix if accidentally included)
+    # Strip brand prefix from model if accidentally present
     model = car_info.get("model", "").strip()
     for brand in ("BMW ", "MINI "):
         if model.startswith(brand):
             model = model[len(brand):]
 
-    # Convert prod_month "YYYY-MM" → "YYYYMM" (RealOEM format)
-    prod_raw   = car_info.get("prod_month")
-    prod_known = prod_raw.replace("-", "") if prod_raw else None
+    # -- Pull custom column values ---------------------------------------------
+    custom        = car_info.get("custom") or {}
+    catalog       = custom.get(COL_CATALOG,      "").strip()
+    series_label  = custom.get(COL_SERIES_LABEL, "").strip()
+    body          = custom.get(COL_BODY,         car_info.get("body", "")).strip()
+    steering_pref = custom.get(COL_STEERING,     "").strip()
 
-    if not series:
-        logger.warning(f"Car {code}: no series value, skipping")
-        return None
+    # prod_month: DB stores YYYYMM00 (8-digit) — keep as-is; RealOEM dropdown
+    # values are also 8-digit (e.g. "20100100"), so we match directly.
+    custom_prod = custom.get(COL_PROD_MONTH, "").strip().replace("-", "")
 
+    # -- Guards ----------------------------------------------------------------
     if is_diesel(model):
-        logger.info(f"Car {code}: diesel model {model!r}, skipping")
+        logger.info(f"Car {code}: diesel model {model!r} -- skipping")
         return None
 
-    # ── Step 1: find the body dropdown value where our model appears ──────
-    target_body = _find_body_for_model(page, series, model, body)
-    if target_body is None:
-        logger.warning(f"Car {code}: model {model!r} not found in series {series}")
+    if not series_label:
+        logger.warning(f"Car {code}: series_label missing in custom columns -- skipping")
         return None
 
-    # ── Step 2: navigate dropdowns exactly like a human ──────────────────
-    #
-    # EUR cars (prod_month known): go directly to exact prod_month via dropdowns.
-    # EGY cars (no prod_month):    enumerate all prod months, match by 4-char prefix.
-    #
-    # For EUR: use _ajax_get_type_code directly — no URL-param guessing.
-    # If type_code prefix doesn't match our code → skip car.
+    if not body:
+        logger.warning(f"Car {code}: body missing in custom columns -- skipping")
+        return None
 
-    if prod_known:
-        # EUR path: step-by-step dropdown navigation with known prod_month.
-        # If the exact prod_month isn't in the dropdown, use the closest available
-        # prod_month that is ≤ prod_known (i.e. the car was produced by that date).
-        prod_to_use = _resolve_prod_month(
-            page, code, series, target_body, model, market, prod_known
-        )
-        if prod_to_use is None:
-            logger.warning(
-                f"Car {code}: no usable prod_month found in dropdown "
-                f"({series}/{target_body}/{model}/{market}) — skipping"
-            )
-            return None
+    logger.info(
+        f"Car {code}: navigating | catalog={catalog!r} | "
+        f"series_label={series_label!r} | body={body!r} | model={model!r} | "
+        f"market={market} | prod={custom_prod or 'EGY-first'} | engine={engine}"
+    )
 
-        tc = disc._ajax_get_type_code(
-            page, series, target_body, model, market, prod_to_use, engine
-        )
-        if not tc:
-            logger.warning(
-                f"Car {code}: step-by-step navigation failed "
-                f"({series}/{target_body}/{model}/{market}/{prod_to_use}/{engine}) — skipping"
-            )
-            return None
-        if tc[:4] != code:
-            logger.warning(
-                f"Car {code}: type_code prefix mismatch — got {tc[:4]}, expected {code} — skipping"
-            )
-            return None
-        logger.info(f"Car {code}: found via step-by-step → {tc}")
-        return _build_car_dict(car_info, {"type_code_full": tc, "steering": ""}, series, target_body, model, prod_to_use)
+    # -- Navigate --------------------------------------------------------------
+    tc = _navigate(
+        page, code,
+        catalog=catalog,
+        series_label=series_label,
+        body=body,
+        model=model,
+        market=market,
+        prod_known=custom_prod,
+        engine=engine,
+        steering_pref=steering_pref,
+    )
 
-    else:
-        # EGY path: enumerate prod months, match by 4-char prefix
-        prods = disc.get_prods(page, series, target_body, model, market)
-        if not prods:
-            logger.warning(f"Car {code}: no prod months for {series}/{target_body}/{model}/{market}")
-            return None
+    if not tc:
+        logger.warning(f"Car {code}: navigation failed -- no type_code found")
+        return None
 
-        for prod in prods:
-            engines = disc.get_engines(page, series, target_body, model, market, prod)
-            if engine and engine not in engines:
-                continue
-            tc = disc._ajax_get_type_code(
-                page, series, target_body, model, market, prod, engine
-            )
-            if tc and tc[:4] == code:
-                logger.info(f"Car {code}: found via enumeration → {tc}")
-                return _build_car_dict(car_info, {"type_code_full": tc, "steering": ""}, series, target_body, model, prod)
-
+    if tc[:4] != code:
         logger.warning(
-            f"Car {code}: no matching type_code found in "
-            f"{series}/{target_body}/{model}/{market} over {len(prods)} prod months — skipping"
+            f"Car {code}: type_code prefix mismatch -- "
+            f"got {tc[:4]!r}, expected {code!r} -- skipping"
         )
         return None
 
+    logger.info(f"Car {code}: matched -> {tc}")
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+    # Reconstruct prod_month used from type_code_full (CODE-MKT-MM-YYYY-...)
+    parts = tc.split("-")
+    prod_used = ""
+    if len(parts) >= 4:
+        try:
+            prod_used = parts[3] + parts[2].zfill(2)   # YYYY + MM -> YYYYMM
+        except Exception:
+            prod_used = custom_prod
 
-def _resolve_prod_month(page, code: str, series: str, body: str, model: str,
-                        market: str, prod_known: str) -> str | None:
+    return {
+        "type_code_full": tc,
+        "series_value":   car_info.get("series", ""),
+        "series_label":   series_label,
+        "body":           body,
+        "model":          model,
+        "market":         market,
+        "prod_month":     prod_used or custom_prod or "",
+        "engine":         engine,
+        "steering":       steering_pref,
+    }
+
+
+# -- Core navigation -----------------------------------------------------------
+
+def _navigate(page, code, *, catalog, series_label, body, model,
+              market, prod_known, engine, steering_pref):
     """
-    Return the best prod_month to use for navigation.
-
-    1. If prod_known exists exactly in the dropdown → use it directly.
-    2. Otherwise fetch the available list and pick the closest prod ≤ prod_known
-       (the latest production date that is at or before the car's known month).
-    3. If no prod ≤ prod_known exists, use the earliest available prod instead.
-    4. Returns None if no prods are available at all.
+    Step-by-step RealOEM form navigation.
+    Returns type_code_full string or None.
     """
-    available = disc.get_prods(page, series, body, model, market)
+
+    # Step 1: Load page with correct catalog context
+    # Classic catalog is controlled via ?archive=1 URL param on RealOEM,
+    # NOT via a named select dropdown element.
+    if catalog.lower() == "classic":
+        safe_goto(page, SELECT_URL + "?archive=1")
+        logger.info(f"Car {code}: Classic catalog loaded (archive=1)")
+    else:
+        safe_goto(page, SELECT_URL)
+
+    # Step 2: Series -- find option by matching label text
+    series_val = _find_option_by_label(page, "series", series_label)
+    if not series_val:
+        logger.warning(
+            f"Car {code}: series_label {series_label!r} not found in dropdown"
+        )
+        return None
+    if not _sel_nav(page, "series", series_val):
+        return None
+
+    # Step 3: Body -- select directly by value; if not found search all bodies
+    if not _sel_nav(page, "body", body):
+        logger.info(
+            f"Car {code}: body {body!r} not in dropdown -- "
+            f"searching all body types for model {model!r}"
+        )
+        body = _find_body_for_model(page, model)
+        if body is None:
+            logger.warning(f"Car {code}: model {model!r} not found in any body type")
+            return None
+        if not _sel_nav(page, "body", body):
+            return None
+
+    # Step 4: Model
+    if not _sel_nav(page, "model", model):
+        logger.warning(f"Car {code}: model {model!r} not found in dropdown")
+        return None
+
+    # Step 5: Market
+    if not _sel_nav(page, "market", market):
+        logger.warning(f"Car {code}: market {market!r} not found in dropdown")
+        return None
+
+    # Step 6 + 7: Prod month + Engine
+    # For EUR: try prod_months ordered by closeness to prod_known, pick the
+    #          first one that has our engine in its dropdown.
+    # For EGY: just pick the first prod option.
+
+    if market == "EGY" or not prod_known:
+        # EGY: first available prod_month, then select engine
+        prod_val = _get_first_option(page, "prod")
+        if not prod_val:
+            logger.warning(f"Car {code}: no prod_month options available")
+            return None
+        logger.info(f"Car {code}: EGY -- using first prod_month: {prod_val}")
+        if not _sel_nav(page, "prod", prod_val):
+            return None
+        if not _sel_nav(page, "engine", engine):
+            logger.warning(f"Car {code}: engine {engine!r} not in dropdown at prod {prod_val}")
+            return None
+    else:
+        # EUR: scan prod_months ordered by distance from prod_known
+        prod_val = _find_prod_with_engine(page, prod_known, engine, code)
+        if prod_val is None:
+            logger.warning(
+                f"Car {code}: no prod_month found that has engine {engine!r}"
+            )
+            return None
+        # prod_val already selected by _find_prod_with_engine; now select engine
+        if not _sel_nav(page, "engine", engine):
+            logger.warning(f"Car {code}: engine {engine!r} select failed")
+            return None
+
+    # Step 8: Steering (optional)
+    _handle_steering(page, steering_pref)
+
+    # Wait for Browse Parts to appear
+    try:
+        page.wait_for_selector(
+            "a[href*='partgrp'], form[action*='partgrp']", timeout=6000
+        )
+    except Exception:
+        pass
+
+    soup = BeautifulSoup(page.content(), "html.parser")
+    return _extract_type_code(soup)
+
+
+# -- Helpers -------------------------------------------------------------------
+
+def _sel_nav(page, name: str, value: str) -> bool:
+    """
+    Select `value` in <select name=name> and wait for the page reload.
+    Returns True on success, False if option not found or error.
+    """
+    try:
+        el = page.locator(f"select[name='{name}']").first
+        el.wait_for(state="visible", timeout=12000)
+
+        if page.locator(f"select[name='{name}'] option[value='{value}']").count() == 0:
+            logger.warning(f"Option {value!r} not in <select name={name!r}>")
+            return False
+
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=15000):
+            el.select_option(value=value)
+        time.sleep(1.5)
+        return True
+    except Exception as e:
+        logger.warning(f"_sel_nav({name!r}, {value!r}): {e}")
+        return False
+
+
+def _find_option_by_label(page, name: str, target_label: str) -> str | None:
+    """
+    Scan <select name=name> options and return the VALUE whose label
+    fuzzy-matches target_label. Returns None if not found.
+    """
+    try:
+        sel = page.locator(f"select[name='{name}']").first
+        sel.wait_for(state="visible", timeout=10000)
+        for opt in page.locator(f"select[name='{name}'] option").all():
+            label = (opt.inner_text() or "").strip()
+            val   = (opt.get_attribute("value") or "").strip()
+            if not val or val.startswith("-"):
+                continue
+            if _labels_match(label, target_label):
+                logger.debug(f"Matched {target_label!r} -> value={val!r}")
+                return val
+    except Exception as e:
+        logger.warning(f"_find_option_by_label({name!r}): {e}")
+    return None
+
+
+def _get_all_options(page, name: str) -> list:
+    """Return all non-blank option values from <select name=name>."""
+    try:
+        return [
+            (opt.get_attribute("value") or "").strip()
+            for opt in page.locator(f"select[name='{name}'] option").all()
+            if (opt.get_attribute("value") or "").strip()
+            and not (opt.get_attribute("value") or "").startswith("-")
+        ]
+    except Exception:
+        return []
+
+
+def _get_first_option(page, name: str) -> str | None:
+    """Return first non-blank option value from <select name=name>."""
+    opts = _get_all_options(page, name)
+    return opts[0] if opts else None
+
+
+def _find_prod_with_engine(page, prod_known: str, engine: str, code: str) -> str | None:
+    """
+    Try available prod_months ordered by closeness to prod_known.
+    For each: select it, check if `engine` is in the engine dropdown.
+    Returns the prod_val that worked (page left in that state), or None.
+    """
+    available = _get_all_options(page, "prod")
     if not available:
         return None
 
+    # Sort by distance from prod_known (closest first), then by value for ties
+    def dist(p):
+        try:
+            return abs(int(p) - int(prod_known))
+        except Exception:
+            return 999999
+
+    candidates = sorted(available, key=lambda p: (dist(p), p))
+
+    for i, prod_val in enumerate(candidates):
+        if not _sel_nav(page, "prod", prod_val):
+            continue
+
+        # Check engine dropdown
+        engine_opts = _get_all_options(page, "engine")
+        if engine in engine_opts:
+            logger.info(
+                f"Car {code}: prod_month {prod_val!r} has engine {engine!r} "
+                f"(tried {i+1}/{len(candidates)} options)"
+            )
+            return prod_val
+
+        # Engine not here; loop to try next prod
+        logger.debug(
+            f"Car {code}: prod {prod_val!r} -- engine {engine!r} not available "
+            f"(engines: {engine_opts})"
+        )
+
+    return None
+
+
+def _resolve_prod(page, prod_known: str) -> str | None:
+    """Legacy helper: exact match, else closest earlier, else earliest."""
+    available = _get_all_options(page, "prod")
+    if not available:
+        return None
     if prod_known in available:
         return prod_known
-
-    # Find closest prod <= prod_known (same or earlier)
     earlier = [p for p in available if p <= prod_known]
-    if earlier:
-        closest = max(earlier)
-        logger.info(
-            f"Car {code}: prod_month {prod_known} not in dropdown "
-            f"— using closest earlier: {closest}"
-        )
-        return closest
-
-    # All available prods are after prod_known; use the earliest one
-    closest = min(available)
-    logger.info(
-        f"Car {code}: prod_month {prod_known} not in dropdown and no earlier option "
-        f"— using earliest available: {closest}"
-    )
-    return closest
+    return max(earlier) if earlier else min(available)
 
 
-def _try_construct_type_code(page, code: str, series: str, model: str,
-                              market: str, prod_known: str) -> str | None:
+def _labels_match(dropdown_label: str, target: str) -> bool:
     """
-    Attempt to construct type_code_full directly and verify it works on RealOEM.
-    Format: {CODE}-{MARKET}-{MM}-{YYYY}-{SERIES}-{MAKE}-{MODEL}
-    Navigates directly to partgrp?id=... — zero dropdown interaction.
-    Returns type_code_full if the page loads successfully, None otherwise.
+    Fuzzy match: normalize unicode spaces/dashes/quotes, collapse whitespace,
+    normalize spaces-around-hyphens, compare lowercase.
+    Handles all common RealOEM unicode variants including:
+      em-space + em-dash + em-space -> " - " which we normalize to "-"
     """
-    from config import BASE_URL
-    from scraper.browser import safe_goto
-    from bs4 import BeautifulSoup
+    import re
+    def norm(s: str) -> str:
+        s = unicodedata.normalize("NFKC", s)
+        s = (s
+             .replace("\u2014", "-")   # em-dash
+             .replace("\u2013", "-")   # en-dash
+             .replace("\u2003", " ")   # em-space
+             .replace("\u2002", " ")   # en-space
+             .replace("\u00a0", " ")   # non-breaking space
+             .replace("\u2019", "'")   # right single quote -> apostrophe
+             .replace("\u2018", "'")   # left single quote  -> apostrophe
+             )
+        s = " ".join(s.lower().split())       # collapse whitespace
+        s = re.sub(r'\s*-\s*', '-', s)        # "2005 - 2010" -> "2005-2010"
+        return s
+    return norm(dropdown_label) == norm(target)
 
-    year  = prod_known[:4]   # "201507" → "2015"
-    month = prod_known[4:]   # "201507" → "07"
 
-    # Determine make: MINI models don't contain BMW model naming patterns
-    mini_keywords = ("cooper", "one ", "countryman", "clubman", "paceman", "roadster")
-    make = "MINI" if any(k in model.lower() for k in mini_keywords) else "BMW"
+def _find_body_for_model(page, model: str) -> str | None:
+    """
+    Fallback: iterate all body options and return the first whose
+    model dropdown contains `model`. Used when stored body value
+    doesn't match a RealOEM dropdown value (e.g. "Sedan" vs "Lim").
+    """
+    body_opts = _get_all_options(page, "body")
+    for body_val in body_opts:
+        # Select body to populate model dropdown
+        if not _sel_nav(page, "body", body_val):
+            continue
+        model_opts = _get_all_options(page, "model")
+        if model in model_opts:
+            logger.info(f"Body fallback: model {model!r} found in body={body_val!r}")
+            return body_val
+        # Body didn't have model; reset by going back to first body
+        # (next _sel_nav call will re-select from current page state)
+    return None
 
-    candidate = f"{code}-{market}-{month}-{year}-{series}-{make}-{model}"
 
+def _handle_steering(page, steering_pref: str):
+    """
+    Select steering if dropdown is present.
+    Priority: custom steering_pref -> Left-hand drive -> first available.
+    """
     try:
-        safe_goto(page, f"{BASE_URL}/bmw/enUS/partgrp?id={candidate}")
-        soup = BeautifulSoup(page.content(), "html.parser")
-        # Confirm we got real group data (not an error page)
-        has_groups = bool(soup.find_all("a", href=lambda h: h and "showparts" in str(h)))
-        if has_groups:
-            logger.info(f"Car {code}: direct type_code constructed instantly → {candidate}")
-            return candidate
-    except Exception as e:
-        logger.debug(f"Car {code}: direct construct failed for {candidate}: {e}")
-
-    return None
-
-
-def _find_body_for_model(page, series: str, model: str, hint_body: str) -> str | None:
-    """
-    Return the body dropdown value for the given series where `model` appears.
-    Tries `hint_body` first (fast path), then searches all bodies.
-    """
-    # Fast path: body from car list matches directly
-    if hint_body:
-        models_in_hint = [m["value"] for m in disc.get_models(page, series, hint_body)]
-        if model in models_in_hint:
-            return hint_body
-
-    # Search all available bodies
-    bodies = disc.get_bodies(page, series)
-    for body_info in bodies:
-        b = body_info["value"]
-        if b == hint_body:
-            continue  # already tried
-        models_in_b = [m["value"] for m in disc.get_models(page, series, b)]
-        if model in models_in_b:
-            return b
-
-    return None
-
-
-def _build_car_dict(car_info: dict, result: dict,
-                    series_value: str, body: str, model: str, prod_month: str) -> dict:
-    return {
-        "type_code_full": result["type_code_full"],
-        "series_value":   series_value,
-        "series_label":   series_value,   # simplified; parts_scraper only needs type_code_full
-        "body":           body,
-        "model":          model,
-        "market":         car_info.get("market", "EUR"),
-        "prod_month":     prod_month,
-        "engine":         car_info.get("engine", ""),
-        "steering":       result.get("steering", ""),
-    }
+        steer_el = page.locator("select[name='steering']")
+        steer_el.wait_for(state="visible", timeout=4000)
+        valid = [
+            o for o in page.locator("select[name='steering'] option").all()
+            if (o.get_attribute("value") or "").strip()
+            and not (o.get_attribute("value") or "").startswith("-")
+        ]
+        if not valid:
+            return
+        chosen = None
+        if steering_pref:
+            chosen = next(
+                (o for o in valid
+                 if steering_pref.lower() in (o.inner_text() or "").lower()),
+                None
+            )
+        if not chosen:
+            chosen = next(
+                (o for o in valid if "left" in (o.inner_text() or "").lower()),
+                valid[0]
+            )
+        _sel_nav(page, "steering", chosen.get_attribute("value") or "")
+    except Exception:
+        pass  # No steering dropdown -- that's fine

@@ -128,6 +128,63 @@
   </main>
 </div>
 
+<div id="confirm-overlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirm-title-el">Remove Car?</div>
+    <div class="confirm-body">Remove <strong id="confirm-car-text"></strong> from the scraper list? This cannot be undone except via the Undo button.</div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" id="confirm-cancel">Cancel</button>
+      <button class="confirm-ok" id="confirm-ok">Yes, Remove</button>
+    </div>
+  </div>
+</div>
+<div id="col-dialog-overlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="col-dialog-title">New Column</div>
+    <div class="confirm-body" style="margin-bottom:14px">
+      <input id="col-dialog-input" class="col-dialog-input" type="text" placeholder="Column title..." maxlength="40" spellcheck="false"/>
+    </div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" id="col-dialog-cancel">Cancel</button>
+      <button class="confirm-ok" id="col-dialog-ok">OK</button>
+    </div>
+  </div>
+</div>
+<div id="edit-car-overlay">
+  <div class="confirm-box edit-car-box">
+    <div class="confirm-title">Edit Car</div>
+    <div class="edit-car-form">
+      <div class="edit-car-row">
+        <label class="edit-car-label">Code</label>
+        <input id="edit-car-code" class="edit-car-input edit-car-input--disabled" type="text" disabled/>
+      </div>
+      <div class="edit-car-row">
+        <label class="edit-car-label">Model</label>
+        <input id="edit-car-model" class="edit-car-input" type="text" maxlength="60" placeholder="e.g. 320i"/>
+      </div>
+      <div class="edit-car-row">
+        <label class="edit-car-label">Series</label>
+        <input id="edit-car-series" class="edit-car-input" type="text" maxlength="40" placeholder="e.g. E90"/>
+      </div>
+      <div class="edit-car-row">
+        <label class="edit-car-label">Market</label>
+        <input id="edit-car-market" class="edit-car-input" type="text" maxlength="10" placeholder="e.g. EGY"/>
+      </div>
+      <div class="edit-car-row">
+        <label class="edit-car-label">Engine</label>
+        <input id="edit-car-engine" class="edit-car-input" type="text" maxlength="40" placeholder="e.g. N46"/>
+      </div>
+      <div class="edit-car-row">
+        <label class="edit-car-label">Prod Month</label>
+        <input id="edit-car-prod" class="edit-car-input" type="text" maxlength="6" placeholder="YYYYMM"/>
+      </div>
+    </div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" id="edit-car-cancel">Cancel</button>
+      <button class="confirm-ok" id="edit-car-save">Save Changes</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 <script src="app.js"></script>
 </body>

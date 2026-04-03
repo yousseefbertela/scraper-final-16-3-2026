@@ -53,11 +53,15 @@
  44  VG99    BMW 320i            3' E90 (2004-2023)              Sedan   N46N    11
 --------------------------------------------------------------------------------
 
+https://www.realoem.com/bmw/enUS/select?product=P&archive=0&series=E60N&body=Lim&model=523i&market=EGY&prod=20070300
+https://www.realoem.com/bmw/enUS/select?product=P&archive=0&series=E60&body=Lim&model=523i&market=EGY&prod=20050600
+
 
 --------------------------------------------------------------------------------
  NEEDS TO BE SCRAPED STARTING FROM HERE UNTIL END OF LIST----->
  first 21 cars are egy market rest are eur market .
  if you have option of left hand drive or right hand drive always choose left hand drive as it is more common in egypt and also in europe.
+problem in navigation is N
  
 --------------------------------------------------------------------------------
  #   Code    Model               Series / Generation           Body    Engine  Cnt
@@ -91,40 +95,38 @@
 --------------------------------------------------------------------------------
  #   Code    Series   Model       Body   Engine   Market   Prod Month
 --------------------------------------------------------------------------------
- 22  MF31    R56      Cooper      HC     N12      EUR      2005-10
- 23  MF71    R56      Cooper S    HC     N14      EUR      2005-11
- 24  SU31    R56N     Cooper      HC     N16      EUR      2009-05
- 25  SV31    R56N     Cooper S    HC     N18      EUR      2009-07
+
  26  XM51    F56      Cooper      HC     B38      EUR      2013-04
- 27  XP51    F56      Cooper      HC     B36      EUR      2015-01
+
  28  XR31    F56      Cooper      HC     B38C     EUR      2019-01
- 29  XR71    F56      Cooper      HC     B36C     EUR      2020-01
+
  30  XM71    F56      Cooper S    HC     B48      EUR      2013-04
- 31  XP71    F56      Cooper S    HC     B46      EUR      2015-01
+
  32  XR51    F56      Cooper S    HC     B48C     EUR      2018-01
- 33  XY71    F56      Cooper S    HC     B46C     EUR      2020-01
+
+
+
  34  31DH    F56N     Cooper      HC     B38C     EUR      2020-03
- 35  41DH    F56N     Cooper      HC     B36C     EUR      2022-01
+
+
+
  36  51DH    F56N     Cooper S    HC     B48C     EUR      2020-03
- 37  61DH    F56N     Cooper S    HC     B46C     EUR      2021-02
+
  38  XS51    F55      Cooper      SH     B38      EUR      2013-09
- 39  XU11    F55      Cooper      SH     B36      EUR      2015-01
+
  40  XU71    F55      Cooper      SH     B38C     EUR      2018-01
- 41  XV71    F55      Cooper      SH     B36C     EUR      2020-01
+
  42  XS71    F55      Cooper S    SH     B48      EUR      2013-09
- 43  XU31    F55      Cooper S    SH     B46      EUR      2014-01
+
  44  XU91    F55      Cooper S    SH     B48C     EUR      2019-01
- 45  XV91    F55      Cooper S    SH     B46C     EUR      2020-01
+
  46  31DK    F55N     Cooper      SH     B38C     EUR      2020-03
- 47  41DK    F55N     Cooper      SH     B36C     EUR      2022-01
  48  51DK    F55N     Cooper S    SH     B48C     EUR      2020-03
- 49  61DK    F55N     Cooper S    SH     B46C     EUR      2021-02
- 50  ZB31    R60      Cooper      CM     N16      EUR      2010-01
- 51  ZC31    R60      Cooper S    CM     N18      EUR      2010-01
+
+
+ 
  52  YS31    F60      Cooper      CM     B38      EUR      2017-01
- 53  YU91    F60      Cooper      CM     B36      EUR      2019-01
  54  YW31    F60      Cooper      CM     B38C     EUR      2019-01
- 55  YX31    F60      Cooper      CM     B36C     EUR      2020-01
  56  YS91    F60      Cooper S    CM     B48      EUR      2017-01
  57  YW71    F60      Cooper S    CM     B48C     EUR      2019-01
  58  21BR    F60N     Cooper      CM     B38C     EUR      2019-05
@@ -138,9 +140,7 @@
  #    Code    Model        Body   Engine   Market   Prod Month
 --------------------------------------------------------------------------------
   60  VX11    X1 16i       SAV    N20      EUR      2012-07
-  61  VP11    X1 18dX      SAV    N47      EUR      2008-09
-  62  VP12    X1 18dX      SAV    N47      EUR      2008-10
-  63  VP71    X1 18dX      SAV    N47N     EUR      2011-03
+
   64  VL35    X1 18i       SAV    N46N     EGY      2010-08
   65  VL32    X1 18i       SAV    N46N     EUR      2008-09
   66  VL31    X1 18i       SAV    N46N     EUR      2009-04
@@ -148,10 +148,6 @@
   68  VL92    X1 20i       SAV    N20      EUR      2009-11
   69  VM91    X1 20iX      SAV    N20      EUR      2010-04
   70  VM92    X1 20iX      SAV    N20      EUR      2011-07
-  71  VL51    X1 25iX      SAV    N52N     EUR      2008-09
-  72  VL52    X1 25iX      SAV    N52N     EUR      2009-05
-  73  VM31    X1 28iX      SAV    N52N     EUR      2008-09
-  74  VM11    X1 28iX      SAV    N20      EUR      2009-06
 --------------------------------------------------------------------------------
 
 
@@ -218,8 +214,7 @@
  106  1A11    116i       SH     N13      EUR      2010-07
  107  1A31    118i       SH     N13      EUR      2010-07
  108  1A51    125i       SH     N20      EUR      2010-07
- 109  1B71    M135i      SH     N55      EUR      2011-11
- 110  1B91    M135iX     SH     N55      EUR      2011-04
+
 --------------------------------------------------------------------------------
 
 
@@ -228,7 +223,7 @@
 --------------------------------------------------------------------------------
  #    Code    Series  Model        Body   Engine   Market   Prod Month
 --------------------------------------------------------------------------------
- 111  FF01    E70     X5 3.0sd     SAV    M57N2    EUR      2007-01
+
  112  FE41    E70     X5 3.0si     SAV    N52N     EUR      2006-05
  113  FE81    E70     X5 4.8i      SAV    N62N     EUR      2006-05
  114  GY01    E70     X5 M         SAV    S63      EUR      2008-07
@@ -237,11 +232,10 @@
  117  LM31    E89     Z4 23i       Roa    N52N     EUR      2008-01
  118  LL51    E89     Z4 28i       Roa    N20      EUR      2011-01
  119  LM51    E89     Z4 30i       Roa    N52N     EUR      2008-01
- 120  LM71    E89     Z4 35i       Roa    N54      EUR      2008-01
- 121  LM11    E89     Z4 35is      Roa    N54T     EUR      2009-09
+
  122  LM12    E89     Z4 35is      Roa    N54T     EUR      2010-01
  123  HF11    G29     Z4 20i       Roa    B48D     EUR      2017-10
- 124  HF71    G29     Z4 20i       Roa    B46D     EUR      2017-11
+ 
  125  HF31    G29     Z4 30i       Roa    B48D     EUR      2017-11
  126  HF51    G29     Z4 M40i      Roa    B58C     EUR      2017-10
  127  HF91    G29     Z4 M40i      Roa    B58D     EUR      2018-02
@@ -255,181 +249,34 @@
 --------------------------------------------------------------------------------
  #    Code    Model        Body   Engine   Market   Prod Month
 --------------------------------------------------------------------------------
- 130  AY31    316i         Lim    N42      EUR      2001-05
- 131  AY11    316i         Lim    N40      EUR      2001-06
- 132  EY11    316i         Lim    N45      EUR      2003-09
- 133  EY31    316i         Lim    N46      EUR      2003-09
- 134  AL51    316i 1.6     Lim    M43      EUR      1998-06
- 135  ER51    316i 1.6     Lim    M43      EUR      2001-08
- 136  AL11    316i 1.9     Lim    M43      EUR      1998-06
- 137  ER11    316i 1.9     Lim    M43      EUR      2001-09
- 138  ER12    316i 1.9     Lim    M43      EUR      2002-03
- 139  AL31    318i         Lim    M43      EUR      1997-04
- 140  AY71    318i         Lim    N42      EUR      2000-12
- 141  AN91    318i         Lim    M43      EUR      2001-09
- 142  EY71    318i         Lim    N46      EUR      2003-09
- 143  ET75    318i         Lim    N46      EUR      2003-10
- 144  EY72    318i         Lim    N46      EUR      2003-12
- 145  AZ71    318i         Lim    N42      EUR      2004-03
- 146  AM11    320i         Lim    M52      EUR      1997-07
+
+ 136  AL11    316i 1.9     Lim    M43      EUR      1998-06--------
+
+ 146  AM11    320i         Lim    M52      EUR      1997-07------
  147  AV11    320i         Lim    M54      EUR      1999-12
- 148  AV12    320i         Lim    M54      EUR      2000-01
- 149  AN15    320i         Lim    M54      EUR      2000-06
- 150  ET15    320i         Lim    M54      EUR      2001-09
- 151  ET16    320i         Lim    M54      EUR      2005-02
- 152  AM31    323i         Lim    M52      EUR      1997-07
- 153  AN31    323i         Lim    M52      EUR      2000-09
- 154  AV31    325i         Lim    M54      EUR      2000-01
- 155  AV32    325i         Lim    M54      EUR      2000-02
- 156  AN35    325i         Lim    M54      EUR      2000-06
- 157  AN36    325i         Lim    M54      EUR      2000-07
- 158  EV31    325i         Lim    M54      EUR      2001-10
- 159  ET35    325i         Lim    M54      EUR      2002-03
- 160  ET36    325i         Lim    M54      EUR      2005-02
- 161  AS31    325xi        Lim    M54      EUR      2000-01
- 162  EU31    325xi        Lim    M54      EUR      2001-09
- 163  AM51    328i         Lim    M52      EUR      1997-04
- 164  AN52    328i         Lim    M52      EUR      2000-06
- 165  AV51    330i         Lim    M54      EUR      1999-09
- 166  AV52    330i         Lim    M54      EUR      1999-10
- 167  AN55    330i         Lim    M54      EUR      2000-03
- 168  AN56    330i         Lim    M54      EUR      2000-04
- 169  ET55    330i         Lim    M54      EUR      2001-10
- 170  ET56    330i         Lim    M54      EUR      2005-02
- 171  ES51    330xi        Lim    M54      EUR      1999-09
- 172  EW51    330xi        Lim    M54      EUR      2001-09
+ 148  AV12    320i         Lim    M54      EUR      2000-01-------
+
+ 169  ET55    330i         Lim    M54      EUR      2001-10-----------
+
 --------------------------------------------------------------------------------
 
 
---------------------------------------------------------------------------------
- BMW REFERENCE — E46 (3 Series) — Cabriolet
---------------------------------------------------------------------------------
- #    Code    Model    Body   Engine   Market   Prod Month
---------------------------------------------------------------------------------
- 173  BP71    318Ci    Cab    N42      EUR      2000-12
- 174  BW71    318Ci    Cab    N42      EUR      2003-04
- 175  BY71    318Ci    Cab    N46      EUR      2003-09
- 176  BS71    320Cd    Cab    M47N     EUR      2004-06
- 177  BS11    320Ci    Cab    M54      EUR      2000-02
- 178  BW11    320Ci    Cab    M54      EUR      2003-04
- 179  BR31    323Ci    Cab    M52      EUR      1998-11
- 180  BS31    325Ci    Cab    M54      EUR      2000-02
- 181  BW31    325Ci    Cab    M54      EUR      2003-04
- 182  BW91    330Cd    Cab    M57N     EUR      2004-11
- 183  BW92    330Cd    Cab    M57N     EUR      2006-08
- 184  BS51    330Ci    Cab    M54      EUR      1999-12
- 185  BW51    330Ci    Cab    M54      EUR      2003-04
- 186  BR91    M3       Cab    S54      EUR      2000-04
- 187  BR92    M3       Cab    S54      EUR      2000-12
---------------------------------------------------------------------------------
+
+
+
+
 
 
 --------------------------------------------------------------------------------
- BMW REFERENCE — E46 (3 Series) — Coupe
---------------------------------------------------------------------------------
- #    Code    Model      Body   Engine   Market   Prod Month
---------------------------------------------------------------------------------
- 188  BL51    316Ci      Cou    M43      EUR      1999-04
- 189  BM71    316Ci      Cou    N40      EUR      2001-07
- 190  BD71    316Ci      Cou    N40      EUR      2002-09
- 191  BX71    316Ci      Cou    N45      EUR      2003-09
- 192  BL31    318Ci      Cou    M43      EUR      1999-03
- 193  BL32    318Ci      Cou    M43      EUR      1999-04
- 194  BV71    318Ci      Cou    N42      EUR      2000-12
- 195  BV72    318Ci      Cou    N42      EUR      2001-04
- 196  BD91    318Ci      Cou    N42      EUR      2002-11
- 197  BX91    318Ci      Cou    N46      EUR      2003-10
- 198  BX92    318Ci      Cou    N46      EUR      2003-12
- 199  BV51    320Cd      Cou    M47N     EUR      2003-03
- 200  BM11    320Ci      Cou    M52      EUR      1998-11
- 201  BN11    320Ci      Cou    M54      EUR      2000-01
- 202  BN12    320Ci      Cou    M54      EUR      2000-02
- 203  BD11    320Ci      Cou    M54      EUR      2002-10
- 204  BM31    323Ci      Cou    M52      EUR      1998-03
- 205  BN31    325Ci      Cou    M54      EUR      2000-01
- 206  BD31    325Ci      Cou    M54      EUR      2002-08
- 207  BM51    328Ci      Cou    M52      EUR      1998-03
- 208  BV91    330Cd      Cou    M57N     EUR      2002-08
- 209  BN51    330Ci      Cou    M54      EUR      1999-09
- 210  BD51    330Ci      Cou    M54      EUR      2002-09
- 211  BL91    M3         Cou    S54      EUR      1999-07
- 212  BL95    M3 CSL     Cou    S54      EUR      2002-09
---------------------------------------------------------------------------------
+
 
 
 --------------------------------------------------------------------------------
- BMW REFERENCE — E46 (3 Series) — Compact / Touring
---------------------------------------------------------------------------------
- #    Code    Model    Body   Engine   Market   Prod Month
---------------------------------------------------------------------------------
- 213  AT51    316ti    com    N42      EUR      2000-03
- 214  AT11    316ti    com    N40      EUR      2001-06
- 215  EZ51    316ti    com    N46      EUR      2003-09
- 216  EZ31    316ti    com    N45      EUR      2003-10
- 217  AU51    318ti    com    N42      EUR      2001-03
- 218  EZ71    318ti    com    N46      EUR      2003-09
- 219  AU52    318ti    com    N42      EUR      2004-01
- 220  AT31    325ti    com    M54      EUR      2000-03
- 221  AX31    316i     tou    N42      EUR      2001-10
- 222  EX31    316i     tou    N46      EUR      2003-10
- 223  AP31    318i     tou    M43      EUR      1998-05
- 224  AX51    318i     tou    N42      EUR      2000-12
- 225  AX52    318i     tou    N42      EUR      2001-05
- 226  EX51    318i     tou    N46      EUR      2003-10
- 227  AR11    320i     tou    M52      EUR      1998-05
- 228  AW11    320i     tou    M54      EUR      2000-01
- 229  AW12    320i     tou    M54      EUR      2000-02
- 230  EN11    320i     tou    M54      EUR      2001-09
- 231  AW32    325i     tou    M54      EUR      2000-01
- 232  AW31    325i     tou    M54      EUR      2000-02
- 233  EN31    325i     tou    M54      EUR      2001-09
---------------------------------------------------------------------------------
+
 
 
 --------------------------------------------------------------------------------
- BMW REFERENCE — E36 (3 Series) — Cabriolet
---------------------------------------------------------------------------------
- #    Code    Model    Body   Engine   Market   Prod Month
---------------------------------------------------------------------------------
- 234  BH31    318i     Cab    M43      EUR      1993-12
- 235  BH41    318i     Cab    M43      EUR      1993-12
- 236  BJ11    320i     Cab    M50      EUR      1992-11
- 237  BJ21    320i     Cab    M50      EUR      1992-12
- 238  BJ41    320i     Cab    M52      EUR      1994-05
- 239  BJ31    320i     Cab    M52      EUR      1994-07
- 240  BJ12    320i     Cab    M50      EUR      1994-12
- 241  BJ22    320i     Cab    M50      EUR      1994-12
- 242  BJ71    323i     Cab    M52      EUR      1995-03
- 243  BJ81    323i     Cab    M52      EUR      1995-03
- 244  BJ72    323i     Cab    M52      EUR      1996-09
- 245  BJ82    323i     Cab    M52      EUR      1996-09
- 246  BJ51    325i     Cab    M50      EUR      1992-08
- 247  BJ61    325i     Cab    M50      EUR      1992-09
- 248  BK71    328i     Cab    M52      EUR      1994-07
- 249  BK81    328i     Cab    M52      EUR      1994-11
---------------------------------------------------------------------------------
 
-
---------------------------------------------------------------------------------
- BMW REFERENCE — E36 (3 Series) — Coupe
---------------------------------------------------------------------------------
- #    Code    Model    Body   Engine   Market   Prod Month
---------------------------------------------------------------------------------
- 250  BE11    316i     Cou    M43      EUR      1993-03
- 251  BE21    316i     Cou    M43      EUR      1993-03
- 252  BE12    316i     Cou    M43      EUR      1998-12
- 253  BE22    316i     Cou    M43      EUR      1998-12
- 254  BF11    320i     Cou    M50      EUR      1991-02
- 255  BF21    320i     Cou    M50      EUR      1991-06
- 256  BF51    320i     Cou    M52      EUR      1994-01
- 257  BF61    320i     Cou    M52      EUR      1994-02
- 258  BF81    323i     Cou    M52      EUR      1994-07
- 259  BF71    323i     Cou    M52      EUR      1995-02
- 260  BF31    325i     Cou    M50      EUR      1990-10
- 261  BF41    325i     Cou    M50      EUR      1990-11
- 262  BG11    328i     Cou    M52      EUR      1994-07
- 263  BG21    328i     Cou    M52      EUR      1994-11
---------------------------------------------------------------------------------
 
 
 --------------------------------------------------------------------------------
@@ -437,30 +284,10 @@
 --------------------------------------------------------------------------------
  #    Code    Model    Body   Engine   Market   Prod Month
 --------------------------------------------------------------------------------
- 264  CA11    316i     Lim    M40      EUR      1990-12
- 265  CA21    316i     Lim    M40      EUR      1991-01
- 266  CA81    316i     Lim    M43      EUR      1993-02
- 267  CA71    316i     Lim    M43      EUR      1993-03
- 268  CP21    316i     Lim    M43      EUR      1998-03
- 269  CA31    318i     Lim    M40      EUR      1989-12
- 270  CA41    318i     Lim    M40      EUR      1990-02
- 271  CA01    318i     Lim    M43      EUR      1993-02
- 272  CA91    318i     Lim    M43      EUR      1993-03
- 273  CA42    318i     Lim    M40      EUR      1994-03
- 274  CP31    318i     Lim    M43      EUR      1998-05
- 275  CP32    318i     Lim    M43      EUR      1998-06
- 276  CP42    318i     Lim    M43      EUR      1998-06
- 277  CB11    320i     Lim    M50      EUR      1990-01
- 278  CB21    320i     Lim    M50      EUR      1990-01
- 279  CB22    320i     Lim    M50      EUR      1990-12
- 280  CB51    320i     Lim    M52      EUR      1993-12
- 281  CB61    320i     Lim    M52      EUR      1994-02
- 282  CB62    320i     Lim    M52      EUR      1998-04
- 283  CB71    323i     Lim    M52      EUR      1994-07
- 284  CB81    323i     Lim    M52      EUR      1995-02
- 285  CP71    323i     Lim    M52      EUR      1998-03
- 286  CB31    325i     Lim    M50      EUR      1989-11
- 287  CB41    325i     Lim    M50      EUR      1989-12
- 288  CD11    328i     Lim    M52      EUR      1994-07
- 289  CD21    328i     Lim    M52      EUR      1994-10
+
+ 266  CA81    316i     Lim    M43      EUR      1993-02-----------
+
+ 280  CB51    320i     Lim    M52      EUR      1993-12----------
+
+ 289  CD21    328i     Lim    M52      EUR      1994-10-------
 ================================================================================
