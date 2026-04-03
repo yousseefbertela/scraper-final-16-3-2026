@@ -1,28 +1,7 @@
 name: bmw-scrapers
 
-# ── Shared DB env vars — inherited by all 8 scraper workers ──────────────────
-envs:
-  - key: DO_DB_HOST
-    scope: RUN_TIME
-    value: db-postgresql-fra1-49814-do-user-35023198-0.m.db.ondigitalocean.com
-  - key: DO_DB_PORT
-    scope: RUN_TIME
-    value: "25060"
-  - key: DO_DB_NAME
-    scope: RUN_TIME
-    value: defaultdb
-  - key: DO_DB_USER
-    scope: RUN_TIME
-    value: doadmin
-  - key: DO_DB_SSLMODE
-    scope: RUN_TIME
-    value: require
-  - key: DO_DB_PASSWORD
-    scope: RUN_TIME
-    type: SECRET
-    value: PASTE_DB_PASSWORD_HERE
+# Env vars are set manually in DigitalOcean UI — not stored in this file.
 
-# ── 8 scraper workers — each runs the same Dockerfile, different SCRAPER_ID ──
 workers:
   - name: scraper-1
     github:
@@ -32,10 +11,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "1"
 
   - name: scraper-2
     github:
@@ -45,10 +20,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "2"
 
   - name: scraper-3
     github:
@@ -58,10 +29,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "3"
 
   - name: scraper-4
     github:
@@ -71,10 +38,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "4"
 
   - name: scraper-5
     github:
@@ -84,10 +47,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "5"
 
   - name: scraper-6
     github:
@@ -97,10 +56,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "6"
 
   - name: scraper-7
     github:
@@ -110,10 +65,6 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "7"
 
   - name: scraper-8
     github:
@@ -123,7 +74,3 @@ workers:
     dockerfile_path: Dockerfile
     instance_count: 1
     instance_size_slug: basic-xs
-    envs:
-      - key: SCRAPER_ID
-        scope: RUN_TIME
-        value: "8"

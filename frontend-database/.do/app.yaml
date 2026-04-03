@@ -1,5 +1,7 @@
 name: bmw-scraper-frontend
 
+# Env vars are set manually in DigitalOcean UI — not stored in this file.
+
 services:
   - name: frontend
     github:
@@ -12,8 +14,3 @@ services:
     http_port: 3000
     instance_count: 1
     instance_size_slug: basic-xxs
-    envs:
-      - key: DATABASE_URL
-        scope: RUN_TIME
-        type: SECRET
-        value: PASTE_DATABASE_URL_HERE
