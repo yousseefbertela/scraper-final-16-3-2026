@@ -1,4 +1,28 @@
-name: scraper-frontend
+name: bmw-scraper-platform
+
+# ── Shared DB env vars inherited by all components ───────────────────────────
+envs:
+  - key: DO_DB_HOST
+    scope: RUN_TIME
+    value: db-postgresql-fra1-49814-do-user-35023198-0.m.db.ondigitalocean.com
+  - key: DO_DB_PORT
+    scope: RUN_TIME
+    value: "25060"
+  - key: DO_DB_NAME
+    scope: RUN_TIME
+    value: defaultdb
+  - key: DO_DB_USER
+    scope: RUN_TIME
+    value: doadmin
+  - key: DO_DB_SSLMODE
+    scope: RUN_TIME
+    value: require
+  - key: DO_DB_PASSWORD
+    scope: RUN_TIME
+    type: SECRET
+    value: PASTE_DB_PASSWORD_HERE
+
+# ── Frontend web service ──────────────────────────────────────────────────────
 services:
   - name: frontend
     source_dir: frontend-database
@@ -15,4 +39,110 @@ services:
       - key: DATABASE_URL
         scope: RUN_TIME
         type: SECRET
-        value: PASTE_YOUR_DATABASE_URL_HERE
+        value: PASTE_DATABASE_URL_HERE
+
+# ── Scraper workers (8 instances, one per SCRAPER_ID) ────────────────────────
+workers:
+  - name: scraper-1
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "1"
+
+  - name: scraper-2
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "2"
+
+  - name: scraper-3
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "3"
+
+  - name: scraper-4
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "4"
+
+  - name: scraper-5
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "5"
+
+  - name: scraper-6
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "6"
+
+  - name: scraper-7
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "7"
+
+  - name: scraper-8
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: basic-xs
+    envs:
+      - key: SCRAPER_ID
+        scope: RUN_TIME
+        value: "8"
