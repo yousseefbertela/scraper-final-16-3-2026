@@ -1,0 +1,19 @@
+name: bmw-scraper-frontend
+
+services:
+  - name: frontend
+    github:
+      repo: yousseefbertela/scraper-final-16-3-2026
+      branch: main
+      deploy_on_push: true
+    source_dir: frontend-database
+    run_command: npm start
+    environment_slug: node-js
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: PASTE_DATABASE_URL_HERE
