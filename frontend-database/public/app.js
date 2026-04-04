@@ -15,6 +15,8 @@ function showView(name) {
   if (btn) btn.classList.add('active');
   state.view = name;
   updateBreadcrumb();
+  const scraperNav = $('scraper-nav');
+  if (scraperNav) scraperNav.style.display = name === 'target' ? 'block' : 'none';
 }
 function updateBreadcrumb() {
   const map = { dashboard:'Overview', catalog:'Catalog', search:'Part Search', groups:'Groups', parts:'Parts' };
@@ -363,13 +365,14 @@ function deleteColumn(colId, colTitle) {
 
 // ── Target List ────────────────────────────────────────────────────────────────
 async function loadTargetList() {
-  const savedScroll = window.scrollY;
+  const viewEl = $('view-target');
+  const savedScroll = viewEl ? viewEl.scrollTop : 0;
   $('target-content').innerHTML = loadingHTML();
   try {
     const [data, colData] = await Promise.all([api('/api/target-list'), api('/api/columns')]);
     customColumns = colData.columns || [];
     renderTargetList(data);
-    window.scrollTo({ top: savedScroll, behavior: 'instant' });
+    if (viewEl) viewEl.scrollTop = savedScroll;
   } catch(e) { $('target-content').innerHTML = errorHTML(e.message); }
 }
 
@@ -399,9 +402,32 @@ function renderTargetList(data) {
 
   const wrap = $('target-content'); wrap.innerHTML = '';
 
+  // Build sidebar scraper navigation
+  const scraperNav = $('scraper-nav');
+  if (scraperNav) {
+    scraperNav.innerHTML = '<div class="scraper-nav-title">Jump to</div>' +
+      scrapers.map(function(sc) {
+        const isDone = sc.scraped === sc.total && sc.total > 0;
+        const label = sc.label || ('Scraper ' + sc.scraper_id);
+        return '<button class="scraper-nav-btn" data-section="scraper-section-' + sc.scraper_id + '">' +
+          '<span class="scraper-nav-dot" style="background:' + (isDone ? 'var(--green)' : sc.scraped > 0 ? 'var(--yellow)' : 'var(--text3)') + '"></span>' +
+          '<span class="scraper-nav-label">' + escHtml(label) + '</span>' +
+          '<span class="scraper-nav-count">' + sc.scraped + '/' + sc.total + '</span>' +
+          '</button>';
+      }).join('');
+    scraperNav.querySelectorAll('.scraper-nav-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const target = document.getElementById(btn.dataset.section);
+        const viewEl = $('view-target');
+        if (target && viewEl) viewEl.scrollTo({ top: target.offsetTop - 16, behavior: 'smooth' });
+      });
+    });
+  }
+
   scrapers.forEach(function(sc) {
     const editable = sc.scraper_id > 0;
     const section = el('div', 'scraper-section');
+    section.id = 'scraper-section-' + sc.scraper_id;
     const header = el('div', 'scraper-section-header');
     const isDone = sc.scraped === sc.total && sc.total > 0;
 
