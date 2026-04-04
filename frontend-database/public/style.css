@@ -239,3 +239,11 @@ tbody td:first-child { color: var(--text); font-family: monospace; font-size: 12
 .edit-btn { width:24px;height:24px;border-radius:5px;border:1px solid rgba(29,111,232,0.25);background:rgba(29,111,232,0.08);color:var(--blue);cursor:pointer;font-size:13px;display:inline-flex;align-items:center;justify-content:center;padding:0;line-height:1;transition:all 0.15s;margin-right:4px; }
 .edit-btn:hover { background:rgba(29,111,232,0.2);border-color:rgba(29,111,232,0.5); }
 .action-cell { white-space:nowrap; }
+.move-btn { width:24px;height:24px;border-radius:5px;border:1px solid rgba(245,158,11,0.25);background:rgba(245,158,11,0.08);color:var(--yellow);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;padding:0;line-height:1;transition:all 0.15s;margin-right:4px; }
+.move-btn:hover { background:rgba(245,158,11,0.2);border-color:rgba(245,158,11,0.5); }
+#move-dropdown { display:none;position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;padding:5px;min-width:170px;box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+#move-dropdown.open { display:block; }
+.move-option { padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text);transition:background 0.12s;display:flex;align-items:center;justify-content:space-between;gap:8px; }
+.move-option:hover { background:var(--bg4); }
+.move-option.current { color:var(--text3);cursor:default;pointer-events:none; }
+.move-current-tag { font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:1px 5px; }

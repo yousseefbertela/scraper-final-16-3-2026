@@ -433,7 +433,7 @@ app.get('/api/target-list', async (req, res) => {
       const list = Array.isArray(row.car_data) ? row.car_data : JSON.parse(row.car_data);
       return {
         scraper_id: row.scraper_id,
-        label:      `Scraper ${row.scraper_id}`,
+        label:      row.scraper_id === 9 ? 'Navigation Problem' : `Scraper ${row.scraper_id}`,
         total:      list.length,
         scraped:    list.filter(c => scrapedCodes.has(c.code)).length,
         cars:       list.map(c => ({
@@ -584,6 +584,37 @@ app.post('/api/target-list/scraper/:id/cars', express.json(), async (req, res) =
     await pool.query('UPDATE scraper_car_lists SET car_data = $1 WHERE scraper_id = $2', [JSON.stringify(list), scraperId]);
     listCache = null;
     res.json({ success: true, car: carInfo });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Move car between scraper groups
+app.post('/api/target-list/move-car', express.json(), async (req, res) => {
+  try {
+    const { fromScraperId, carCode, toScraperId } = req.body;
+    const code = String(carCode).toUpperCase();
+
+    // Remove from source
+    const srcRes = await pool.query('SELECT car_data FROM scraper_car_lists WHERE scraper_id=$1', [fromScraperId]);
+    if (!srcRes.rows.length) return res.status(404).json({ error: 'Source scraper not found' });
+    const srcList = Array.isArray(srcRes.rows[0].car_data) ? srcRes.rows[0].car_data : JSON.parse(srcRes.rows[0].car_data);
+    const carIdx = srcList.findIndex(c => c.code === code);
+    if (carIdx === -1) return res.status(404).json({ error: 'Car not found in source scraper' });
+    const [car] = srcList.splice(carIdx, 1);
+    srcList.forEach((c, i) => { c.num = i + 1; });
+    await pool.query('UPDATE scraper_car_lists SET car_data=$1 WHERE scraper_id=$2', [JSON.stringify(srcList), fromScraperId]);
+
+    // Append to destination (toScraperId=0 means Previously Scraped — just remove from source)
+    if (toScraperId > 0) {
+      const dstRes = await pool.query('SELECT car_data FROM scraper_car_lists WHERE scraper_id=$1', [toScraperId]);
+      if (!dstRes.rows.length) return res.status(404).json({ error: 'Destination scraper not found' });
+      const dstList = Array.isArray(dstRes.rows[0].car_data) ? dstRes.rows[0].car_data : JSON.parse(dstRes.rows[0].car_data);
+      car.num = dstList.length + 1;
+      dstList.push(car);
+      await pool.query('UPDATE scraper_car_lists SET car_data=$1 WHERE scraper_id=$2', [JSON.stringify(dstList), toScraperId]);
+    }
+
+    listCache = null;
+    res.json({ success: true, car, fromScraperId, toScraperId });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -219,6 +219,8 @@ async function performUndo() {
       await apiMutate('PATCH', '/api/target-list/scraper/' + action.scraperId + '/cars/' + action.car.code + '/custom', { colId: action.colId, value: action.oldValue });
     } else if (action.type === 'edit') {
       await apiMutate('PATCH', '/api/target-list/scraper/' + action.scraperId + '/cars/' + action.car.code, action.prev);
+    } else if (action.type === 'move') {
+      await apiMutate('POST', '/api/target-list/move-car', { fromScraperId: action.toScraperId, carCode: action.car.code, toScraperId: action.fromScraperId });
     }
     toast('Undone: ' + action.desc);
     loadTargetList();
@@ -259,6 +261,55 @@ async function saveEditCar() {
     loadTargetList();
   } catch(e) { toast('Save failed: ' + e.message); }
   finally { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
+}
+
+// ── Move Car Dropdown ──────────────────────────────────────────────────────────
+let moveDropState = null;
+
+const MOVE_GROUPS = [
+  { id: 0, label: 'Previously Scraped' },
+  { id: 1, label: 'Scraper 1' }, { id: 2, label: 'Scraper 2' },
+  { id: 3, label: 'Scraper 3' }, { id: 4, label: 'Scraper 4' },
+  { id: 5, label: 'Scraper 5' }, { id: 6, label: 'Scraper 6' },
+  { id: 7, label: 'Scraper 7' }, { id: 8, label: 'Scraper 8' },
+  { id: 9, label: 'Navigation Problem' },
+];
+
+function showMoveDropdown(btn, scraperId, code) {
+  hideMoveDropdown();
+  moveDropState = { scraperId, code };
+  const dd = $('move-dropdown');
+  dd.innerHTML = MOVE_GROUPS.map(function(g) {
+    const isCurrent = g.id === scraperId;
+    return '<div class="move-option' + (isCurrent ? ' current' : '') + '" data-to="' + g.id + '">' +
+      g.label + (isCurrent ? ' <span class="move-current-tag">current</span>' : '') + '</div>';
+  }).join('');
+  const rect = btn.getBoundingClientRect();
+  dd.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+  dd.style.left = Math.max(4, rect.left + window.scrollX - 80) + 'px';
+  dd.classList.add('open');
+  dd.querySelectorAll('.move-option:not(.current)').forEach(function(opt) {
+    opt.addEventListener('click', function() {
+      doMoveCar(scraperId, code, parseInt(opt.dataset.to));
+    });
+  });
+}
+
+function hideMoveDropdown() {
+  $('move-dropdown').classList.remove('open');
+  $('move-dropdown').innerHTML = '';
+  moveDropState = null;
+}
+
+async function doMoveCar(fromId, code, toId) {
+  hideMoveDropdown();
+  const toLabel = (MOVE_GROUPS.find(function(g) { return g.id === toId; }) || {}).label || ('Scraper ' + toId);
+  try {
+    const result = await apiMutate('POST', '/api/target-list/move-car', { fromScraperId: fromId, carCode: code, toScraperId: toId });
+    pushUndo({ type: 'move', fromScraperId: fromId, toScraperId: toId, car: result.car, desc: 'move ' + code + ' \u2192 ' + toLabel });
+    toast(code + ' moved to ' + toLabel);
+    loadTargetList();
+  } catch(e) { toast('Move failed: ' + e.message); }
 }
 
 async function apiMutate(method, path, body) {
@@ -421,7 +472,7 @@ function buildTable(cars, scraperId, editable) {
       }
     });
     const actionTd = editable
-      ? (c.scraped ? '<td></td>' : '<td class="action-cell"><button class="edit-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Edit car">\u270e</button><button class="remove-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" data-model="' + escHtml(c.model) + '" title="Remove car">\u2715</button></td>')
+      ? (c.scraped ? '<td></td>' : '<td class="action-cell"><button class="move-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Move to scraper">\u21c4</button><button class="edit-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Edit car">\u270e</button><button class="remove-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" data-model="' + escHtml(c.model) + '" title="Remove car">\u2715</button></td>')
       : '';
     tr.innerHTML =
       '<td style="color:var(--text3);font-size:12px">' + c.num + '</td>' +
@@ -454,6 +505,17 @@ function buildTable(cars, scraperId, editable) {
         pushUndo({ type: 'custom', scraperId: parseInt(input.dataset.scraper), car: { code: input.dataset.code }, colId: input.dataset.colId, oldValue: saved, desc: 'edit ' + input.dataset.code });
         saved = nv; toast('Saved');
       } catch(e) { toast('Save failed: ' + e.message); input.value = saved; }
+    });
+  });
+
+  // Wire move buttons
+  tableWrap.querySelectorAll('.move-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const scraperId = parseInt(btn.dataset.scraper);
+      const code = btn.dataset.code;
+      if (moveDropState && moveDropState.code === code) { hideMoveDropdown(); return; }
+      showMoveDropdown(btn, scraperId, code);
     });
   });
 
@@ -557,6 +619,11 @@ $('edit-car-save').addEventListener('click', saveEditCar);
     if (e.key === 'Enter') saveEditCar();
     if (e.key === 'Escape') $('edit-car-cancel').click();
   });
+});
+document.addEventListener('click', function(e) {
+  if (moveDropState && !e.target.closest('#move-dropdown') && !e.target.classList.contains('move-btn')) {
+    hideMoveDropdown();
+  }
 });
 initModal();
 initSearch();
