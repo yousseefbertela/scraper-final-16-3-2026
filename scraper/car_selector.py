@@ -112,10 +112,13 @@ def find_car_type_code(page, car_info: dict):
 
     if tc[:4] != code:
         logger.warning(
-            f"Car {code}: type_code prefix mismatch -- "
-            f"got {tc[:4]!r}, expected {code!r} -- skipping"
+            f"Car {code}: prefix mismatch (got {tc[:4]!r}) -- "
+            f"trying all prod_months as fallback"
         )
-        return None
+        tc = _try_all_prod_months(page, code, engine, steering_pref)
+        if not tc:
+            logger.warning(f"Car {code}: no prod_month matched prefix {code!r} -- skipping")
+            return None
 
     logger.info(f"Car {code}: matched -> {tc}")
 
@@ -339,6 +342,35 @@ def _find_prod_with_engine(page, prod_known: str, engine: str, code: str) -> str
             f"(engines: {engine_opts})"
         )
 
+    return None
+
+
+def _try_all_prod_months(page, code: str, engine: str, steering_pref: str) -> str | None:
+    """
+    Fallback when normal navigation gives a wrong type_code prefix.
+    Page is already at the full selection state (series/body/model/market all chosen).
+    Iterates every prod_month option from first to last, selects engine + steering
+    for each, extracts type_code, returns the first whose prefix matches code.
+    """
+    prod_opts = _get_all_options(page, "prod")
+    logger.info(f"Car {code}: scanning {len(prod_opts)} prod_months for prefix match")
+    for prod_val in prod_opts:
+        if not _sel_nav(page, "prod", prod_val):
+            continue
+        if not _sel_nav(page, "engine", engine):
+            continue
+        _handle_steering(page, steering_pref)
+        try:
+            page.wait_for_selector(
+                "a[href*='partgrp'], form[action*='partgrp']", timeout=6000
+            )
+        except Exception:
+            pass
+        soup = BeautifulSoup(page.content(), "html.parser")
+        tc = _extract_type_code(soup)
+        if tc and tc[:4] == code:
+            logger.info(f"Car {code}: fallback matched prod={prod_val} -> {tc}")
+            return tc
     return None
 
 
