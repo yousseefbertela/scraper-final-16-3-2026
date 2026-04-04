@@ -5,6 +5,53 @@ const fmtDate = s => s ? new Date(s).toLocaleString('en-GB', {day:'2-digit',mont
 
 let state = { view: 'dashboard', currentCar: null, currentGroup: null, overviewData: null };
 
+// ── Admin / Auth ───────────────────────────────────────────────────────────────
+let isAdmin = sessionStorage.getItem('bmw_admin') === '1';
+
+function _checkPw(pw) { return pw === 'BMW2026ETK\''; }
+
+function updateAdminBtn() {
+  const btn = $('admin-btn');
+  if (!btn) return;
+  if (isAdmin) {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Admin Mode';
+    btn.classList.add('admin-active');
+  } else {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg> Enter Password';
+    btn.classList.remove('admin-active');
+  }
+}
+
+function toggleAdmin() {
+  if (isAdmin) {
+    isAdmin = false;
+    sessionStorage.removeItem('bmw_admin');
+    updateAdminBtn();
+    if (state.view === 'target') loadTargetList();
+    toast('Switched to read-only mode');
+  } else {
+    $('password-input').value = '';
+    $('password-error').textContent = '';
+    $('password-overlay').classList.add('open');
+    setTimeout(() => $('password-input').focus(), 50);
+  }
+}
+
+function submitPassword() {
+  const pw = $('password-input').value;
+  if (_checkPw(pw)) {
+    isAdmin = true;
+    sessionStorage.setItem('bmw_admin', '1');
+    $('password-overlay').classList.remove('open');
+    updateAdminBtn();
+    if (state.view === 'target') loadTargetList();
+    toast('Admin mode enabled');
+  } else {
+    $('password-error').textContent = 'Incorrect password';
+    $('password-input').select();
+  }
+}
+
 // ── Navigation ─────────────────────────────────────────────────────────────────
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -398,7 +445,7 @@ function renderTargetList(data) {
   undoBtn.disabled = undoStack.length === 0;
   undoBtn.addEventListener('click', performUndo);
   st.innerHTML = '<span>All Scrapers (' + scrapers.length + ')</span>';
-  st.appendChild(undoBtn);
+  if (isAdmin) st.appendChild(undoBtn);
 
   const wrap = $('target-content'); wrap.innerHTML = '';
 
@@ -425,7 +472,7 @@ function renderTargetList(data) {
   }
 
   scrapers.forEach(function(sc) {
-    const editable = sc.scraper_id > 0;
+    const editable = isAdmin && sc.scraper_id > 0;
     const section = el('div', 'scraper-section');
     section.id = 'scraper-section-' + sc.scraper_id;
     const header = el('div', 'scraper-section-header');
@@ -469,10 +516,10 @@ function buildTable(cars, scraperId, editable) {
     thHtml += '<th class="custom-col-th">' +
       '<div class="col-th-inner">' +
         '<span class="col-title-text">' + escHtml(col.title) + '</span>' +
-        '<div class="col-th-btns">' +
+        (isAdmin ? '<div class="col-th-btns">' +
           '<button class="col-rename-btn" data-col-id="' + col.id + '" data-col-title="' + escHtml(col.title) + '" title="Rename">\u270e</button>' +
           '<button class="col-delete-btn" data-col-id="' + col.id + '" data-col-title="' + escHtml(col.title) + '" title="Delete">\u00d7</button>' +
-        '</div>' +
+          '</div>' : '') +
       '</div></th>';
   });
   thHtml += '<th>Status</th>' + (editable ? '<th style="width:60px"></th>' : '') + '</tr>';
@@ -493,7 +540,7 @@ function buildTable(cars, scraperId, editable) {
     let customTds = '';
     customColumns.forEach(function(col) {
       const val = escHtml((c.custom || {})[col.id] || '');
-      if (c.scraped) {
+      if (c.scraped || !isAdmin) {
         customTds += '<td style="color:var(--text2);font-size:12px">' + val + '</td>';
       } else {
         customTds += '<td><input class="custom-col-input" type="text" placeholder="..." value="' + val + '" data-code="' + c.code + '" data-scraper="' + scraperId + '" data-col-id="' + col.id + '"/></td>';
@@ -655,6 +702,13 @@ document.addEventListener('click', function(e) {
     hideMoveDropdown();
   }
 });
+$('password-cancel').addEventListener('click', function() { $('password-overlay').classList.remove('open'); });
+$('password-ok').addEventListener('click', submitPassword);
+$('password-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitPassword();
+  if (e.key === 'Escape') $('password-cancel').click();
+});
+updateAdminBtn();
 initModal();
 initSearch();
 loadDashboard();
