@@ -625,7 +625,13 @@ app.patch('/api/target-list/scraper/:id/cars/:code', express.json(), async (req,
     if (series     !== undefined) car.series     = String(series).trim();
     if (market     !== undefined) car.market     = String(market).trim();
     if (engine     !== undefined) car.engine     = String(engine).trim();
-    if (prod_month !== undefined) car.prod_month = String(prod_month).trim();
+    if (prod_month !== undefined) {
+      const pm = String(prod_month).trim();
+      car.prod_month = pm;
+      // Keep custom PROD_MONTH column in sync so the table display updates
+      if (!car.custom) car.custom = {};
+      car.custom['col_1775163979435_jilnc'] = pm;
+    }
     await pool.query('UPDATE scraper_car_lists SET car_data=$1 WHERE scraper_id=$2', [JSON.stringify(list), scraperId]);
     listCache = null;
     res.json({ success: true, car, prev });
