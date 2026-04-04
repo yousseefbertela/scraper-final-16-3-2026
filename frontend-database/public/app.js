@@ -363,11 +363,13 @@ function deleteColumn(colId, colTitle) {
 
 // ── Target List ────────────────────────────────────────────────────────────────
 async function loadTargetList() {
+  const savedScroll = window.scrollY;
   $('target-content').innerHTML = loadingHTML();
   try {
     const [data, colData] = await Promise.all([api('/api/target-list'), api('/api/columns')]);
     customColumns = colData.columns || [];
     renderTargetList(data);
+    window.scrollTo({ top: savedScroll, behavior: 'instant' });
   } catch(e) { $('target-content').innerHTML = errorHTML(e.message); }
 }
 
@@ -472,7 +474,9 @@ function buildTable(cars, scraperId, editable) {
       }
     });
     const actionTd = editable
-      ? (c.scraped ? '<td></td>' : '<td class="action-cell"><button class="move-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Move to scraper">\u21c4</button><button class="edit-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Edit car">\u270e</button><button class="remove-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" data-model="' + escHtml(c.model) + '" title="Remove car">\u2715</button></td>')
+      ? (c.scraped
+          ? '<td class="action-cell"><button class="move-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Move to scraper">\u21c4</button></td>'
+          : '<td class="action-cell"><button class="move-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Move to scraper">\u21c4</button><button class="edit-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" title="Edit car">\u270e</button><button class="remove-btn" data-code="' + c.code + '" data-scraper="' + scraperId + '" data-model="' + escHtml(c.model) + '" title="Remove car">\u2715</button></td>')
       : '';
     tr.innerHTML =
       '<td style="color:var(--text3);font-size:12px">' + c.num + '</td>' +
