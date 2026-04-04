@@ -208,6 +208,15 @@ async function getCarData(typeCode) {
 // ── API routes ────────────────────────────────────────────────────────────────
 
 // Overview: reads _summary + checkpoints — loads in <1s
+// Auth — password checked server-side against ADMIN_PASSWORD env var
+app.post('/api/auth', express.json(), (req, res) => {
+  const { password } = req.body || {};
+  const correct = process.env.ADMIN_PASSWORD;
+  if (!correct) return res.status(503).json({ error: 'ADMIN_PASSWORD env var not set' });
+  if (password === correct) return res.json({ ok: true });
+  return res.status(401).json({ ok: false, error: 'Incorrect password' });
+});
+
 app.get('/api/overview', async (req, res) => {
   try {
     const [summary, cpRows] = await Promise.all([

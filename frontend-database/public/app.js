@@ -8,8 +8,6 @@ let state = { view: 'dashboard', currentCar: null, currentGroup: null, overviewD
 // ── Admin / Auth ───────────────────────────────────────────────────────────────
 let isAdmin = sessionStorage.getItem('bmw_admin') === '1';
 
-function _checkPw(pw) { return pw === 'BMW2026ETK\''; }
-
 function updateAdminBtn() {
   const btn = $('admin-btn');
   if (!btn) return;
@@ -37,18 +35,32 @@ function toggleAdmin() {
   }
 }
 
-function submitPassword() {
+async function submitPassword() {
   const pw = $('password-input').value;
-  if (_checkPw(pw)) {
-    isAdmin = true;
-    sessionStorage.setItem('bmw_admin', '1');
-    $('password-overlay').classList.remove('open');
-    updateAdminBtn();
-    if (state.view === 'target') loadTargetList();
-    toast('Admin mode enabled');
-  } else {
-    $('password-error').textContent = 'Incorrect password';
-    $('password-input').select();
+  const okBtn = $('password-ok');
+  okBtn.disabled = true; okBtn.textContent = 'Checking...';
+  try {
+    const r = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      isAdmin = true;
+      sessionStorage.setItem('bmw_admin', '1');
+      $('password-overlay').classList.remove('open');
+      updateAdminBtn();
+      if (state.view === 'target') loadTargetList();
+      toast('Admin mode enabled');
+    } else {
+      $('password-error').textContent = data.error || 'Incorrect password';
+      $('password-input').select();
+    }
+  } catch(e) {
+    $('password-error').textContent = 'Server error — try again';
+  } finally {
+    okBtn.disabled = false; okBtn.textContent = 'Enter';
   }
 }
 
