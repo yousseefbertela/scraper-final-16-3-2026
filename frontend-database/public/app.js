@@ -215,7 +215,7 @@ function renderCatalogList(cars) {
   const listEl = $('catalog-car-list'); listEl.innerHTML = '';
   cars.forEach(car => {
     const card = el('div', 'car-card');
-    card.innerHTML = '<div class="car-card-model">BMW ' + car.model + '</div><div class="car-card-series">' + (car.series||'') + '</div><div class="car-card-meta"><span class="tag blue">' + (car.market||'') + '</span><span class="tag">' + (car.engine||'N/A') + '</span></div><div class="car-card-stats"><div class="car-stat"><strong>' + fmt(car.parts_count) + '</strong> parts</div></div>';
+    card.innerHTML = '<div class="car-card-model">BMW ' + car.model + '</div><div class="car-card-series">' + (car.series||'') + '</div><div class="car-card-typecode">' + (car.type_code ? car.type_code.substring(0,4) : '') + '</div><div class="car-card-meta"><span class="tag blue">' + (car.market||'') + '</span><span class="tag">' + (car.engine||'N/A') + '</span></div><div class="car-card-stats"><div class="car-stat"><strong>' + fmt(car.parts_count) + '</strong> parts</div></div>';
     card.addEventListener('click', () => openCar(car.type_code));
     listEl.appendChild(card);
   });
