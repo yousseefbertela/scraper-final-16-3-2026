@@ -380,6 +380,40 @@ app.get('/api/cars/:typeCode/groups/:groupId', async (req, res) => {
 });
 
 
+// Per-car search: loads only one prefix row — fast
+app.get('/api/cars/:typeCode/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toLowerCase().trim();
+    if (q.length < 2) return res.json({ results: [] });
+
+    const car = await getCarData(req.params.typeCode);
+    if (!car) return res.status(404).json({ error: 'Car not found' });
+
+    const results = [];
+    for (const [gId, group] of Object.entries(car.groups || {})) {
+      for (const [sgId, sg] of Object.entries(group.subgroups || {})) {
+        for (const part of (sg.parts || [])) {
+          if (JSON.stringify(part).toLowerCase().includes(q)) {
+            results.push({
+              group_id:      gId,
+              group_name:    group.group_name,
+              subgroup_id:   sgId,
+              subgroup_name: sg.subgroup_name,
+              part,
+            });
+            if (results.length >= 200) break;
+          }
+        }
+        if (results.length >= 200) break;
+      }
+      if (results.length >= 200) break;
+    }
+
+    res.json({ results, truncated: results.length >= 200 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
 // Search: needs full data — will be slow if not cached; use after overview has cached it
 app.get('/api/search', async (req, res) => {
   try {

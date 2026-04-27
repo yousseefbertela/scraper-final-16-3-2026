@@ -95,7 +95,13 @@
       </div>
       <div class="page-title" id="groups-title">Groups</div>
       <div class="car-meta" id="groups-meta"></div>
-      <div class="section-title">Part Groups</div>
+      <div class="car-search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="car-search-input" placeholder="Search parts in this vehicle..." autocomplete="off" />
+        <button id="car-search-clear" title="Clear">&#x2715;</button>
+      </div>
+      <div id="car-search-results"></div>
+      <div class="section-title" id="groups-section-title">Part Groups</div>
       <div id="groups-list" class="groups-grid"></div>
     </section>
 

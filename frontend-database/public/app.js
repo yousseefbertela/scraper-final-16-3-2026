@@ -136,11 +136,17 @@ function renderDashboard(data) {
 }
 
 // ── Car groups view ────────────────────────────────────────────────────────────
+let _carSearchTimer = null;
+
 async function openCar(typeCode) {
   state.currentCar = null;
   $('groups-title').textContent = 'Loading...';
   $('groups-meta').innerHTML = '';
   $('groups-list').innerHTML = loadingHTML();
+  $('car-search-input').value = '';
+  $('car-search-results').innerHTML = '';
+  $('car-search-results').style.display = 'none';
+  $('groups-section-title').style.display = '';
   showView('groups');
   try {
     const car = await api('/api/cars/' + encodeURIComponent(typeCode));
@@ -152,7 +158,95 @@ async function openCar(typeCode) {
       $('groups-list').innerHTML = '<div class="wip-notice"><p>Scraping in progress \u2014 currently on group <strong>' + (car.in_progress_group||'?') + '</strong> (' + (car.groups_done||0) + ' group(s) completed so far).</p><p>Parts data will appear here once the first group is saved.</p></div>';
     } else { renderGroups(car.groups, typeCode); }
     updateBreadcrumb();
+    initCarSearch(typeCode);
   } catch(e) { $('groups-list').innerHTML = errorHTML(e.message); }
+}
+
+function initCarSearch(typeCode) {
+  const input = $('car-search-input');
+  const clearBtn = $('car-search-clear');
+  const resultsEl = $('car-search-results');
+  const sectionTitle = $('groups-section-title');
+  const groupsList = $('groups-list');
+
+  const newInput = input.cloneNode(true);
+  input.parentNode.replaceChild(newInput, input);
+  const newClear = clearBtn.cloneNode(true);
+  clearBtn.parentNode.replaceChild(newClear, clearBtn);
+
+  function clearSearch() {
+    newInput.value = '';
+    resultsEl.innerHTML = '';
+    resultsEl.style.display = 'none';
+    sectionTitle.style.display = '';
+    groupsList.style.display = '';
+    newClear.style.display = 'none';
+  }
+
+  newClear.style.display = 'none';
+  newClear.addEventListener('click', clearSearch);
+
+  newInput.addEventListener('input', () => {
+    clearTimeout(_carSearchTimer);
+    const q = newInput.value.trim();
+    newClear.style.display = q ? '' : 'none';
+    if (q.length < 2) { clearSearch(); newInput.value = q; return; }
+    resultsEl.innerHTML = '<div class="car-search-loading">Searching\u2026</div>';
+    resultsEl.style.display = 'block';
+    sectionTitle.style.display = 'none';
+    groupsList.style.display = 'none';
+    _carSearchTimer = setTimeout(async () => {
+      try {
+        const data = await api('/api/cars/' + encodeURIComponent(typeCode) + '/search?q=' + encodeURIComponent(q));
+        renderCarSearchResults(data, typeCode, q);
+      } catch(e) { resultsEl.innerHTML = errorHTML(e.message); }
+    }, 350);
+  });
+}
+
+function renderCarSearchResults(data, typeCode, q) {
+  const el2 = $('car-search-results');
+  if (!data.results || data.results.length === 0) {
+    el2.innerHTML = '<div class="car-search-empty">No parts found for <strong>' + escapeHtml(q) + '</strong></div>';
+    return;
+  }
+  const ql = q.toLowerCase();
+  let html = '<div class="car-search-count">' + data.results.length + (data.truncated ? '+' : '') + ' parts found</div>';
+  html += '<div class="car-search-list">';
+  data.results.forEach(r => {
+    const p = r.part;
+    const partNum = p.part_number || '';
+    const desc = p.description || '';
+    const supplier = p.supplier || '';
+    const notes = p.notes || '';
+    html += '<div class="csr-row" data-group="' + escapeHtml(r.group_id) + '" data-gname="' + escapeHtml(r.group_name) + '" data-tc="' + escapeHtml(typeCode) + '">';
+    html += '<div class="csr-path">Group ' + escapeHtml(r.group_id) + ' &rsaquo; ' + escapeHtml(r.group_name) + ' &rsaquo; ' + escapeHtml(r.subgroup_name) + '</div>';
+    html += '<div class="csr-main">';
+    if (partNum) html += '<span class="csr-partnum">' + highlight(partNum, ql) + '</span>';
+    if (desc)    html += '<span class="csr-desc">' + highlight(desc, ql) + '</span>';
+    if (supplier && supplier !== '--') html += '<span class="csr-tag">' + highlight(supplier, ql) + '</span>';
+    if (notes && notes !== '--')    html += '<span class="csr-notes">' + highlight(notes, ql) + '</span>';
+    html += '</div></div>';
+  });
+  html += '</div>';
+  if (data.truncated) html += '<div class="car-search-trunc">Showing first 200 results — refine your query for more precise results.</div>';
+  el2.innerHTML = html;
+  el2.querySelectorAll('.csr-row').forEach(row => {
+    row.addEventListener('click', () => {
+      openGroup(row.dataset.tc, row.dataset.group, row.dataset.gname);
+    });
+  });
+}
+
+function highlight(text, q) {
+  if (!q) return escapeHtml(text);
+  const idx = text.toLowerCase().indexOf(q);
+  if (idx === -1) return escapeHtml(text);
+  return escapeHtml(text.slice(0, idx)) + '<mark>' + escapeHtml(text.slice(idx, idx + q.length)) + '</mark>' + escapeHtml(text.slice(idx + q.length));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function renderGroups(groups, typeCode) {
   const list = $('groups-list'); list.innerHTML = '';
