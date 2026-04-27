@@ -219,7 +219,7 @@ function renderCarSearchResults(data, typeCode, q) {
     const desc = p.description || '';
     const supplier = p.supplier || '';
     const notes = p.notes || '';
-    html += '<div class="csr-row" data-group="' + escapeHtml(r.group_id) + '" data-gname="' + escapeHtml(r.group_name) + '" data-tc="' + escapeHtml(typeCode) + '">';
+    html += '<div class="csr-row" data-group="' + escapeHtml(r.group_id) + '" data-gname="' + escapeHtml(r.group_name) + '" data-tc="' + escapeHtml(typeCode) + '" data-partnum="' + escapeHtml(partNum) + '" data-sgid="' + escapeHtml(r.subgroup_id) + '">';
     html += '<div class="csr-path">Group ' + escapeHtml(r.group_id) + ' &rsaquo; ' + escapeHtml(r.group_name) + ' &rsaquo; ' + escapeHtml(r.subgroup_name) + '</div>';
     html += '<div class="csr-main">';
     if (partNum) html += '<span class="csr-partnum">' + highlight(partNum, ql) + '</span>';
@@ -233,7 +233,7 @@ function renderCarSearchResults(data, typeCode, q) {
   el2.innerHTML = html;
   el2.querySelectorAll('.csr-row').forEach(row => {
     row.addEventListener('click', () => {
-      openGroup(row.dataset.tc, row.dataset.group, row.dataset.gname);
+      openGroup(row.dataset.tc, row.dataset.group, row.dataset.gname, row.dataset.partnum, row.dataset.sgid);
     });
   });
 }
@@ -259,19 +259,41 @@ function renderGroups(groups, typeCode) {
 }
 
 // ── Parts view ─────────────────────────────────────────────────────────────────
-async function openGroup(typeCode, groupId, groupName) {
+async function openGroup(typeCode, groupId, groupName, highlightPartNum, highlightSgId) {
   state.currentGroup = { group_id: groupId, group_name: groupName };
   $('parts-title').textContent = groupName;
   $('parts-content').innerHTML = loadingHTML();
   showView('parts'); updateBreadcrumb();
-  try { const data = await api('/api/cars/' + encodeURIComponent(typeCode) + '/groups/' + groupId); renderParts(data); }
+  try {
+    const data = await api('/api/cars/' + encodeURIComponent(typeCode) + '/groups/' + groupId);
+    renderParts(data);
+    if (highlightPartNum) scrollToAndHighlightPart(highlightPartNum, highlightSgId);
+  }
   catch(e) { $('parts-content').innerHTML = errorHTML(e.message); }
 }
+
+function scrollToAndHighlightPart(partNum, sgId) {
+  const view = document.getElementById('view-parts');
+  let target = null;
+  if (sgId) {
+    const block = view.querySelector('.subgroup-block[data-sgid="' + sgId + '"]');
+    if (block) target = block.querySelector('tr[data-part-num="' + partNum + '"]');
+  }
+  if (!target) target = view.querySelector('tr[data-part-num="' + partNum + '"]');
+  if (!target) return;
+  setTimeout(() => {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('part-flash');
+    setTimeout(() => target.classList.remove('part-flash'), 2000);
+  }, 80);
+}
+
 function renderParts(data) {
   const wrap = $('parts-content'); wrap.innerHTML = '';
   if (!data.subgroups || data.subgroups.length === 0) { wrap.innerHTML = '<p class="no-parts">No subgroups found.</p>'; return; }
   data.subgroups.forEach(sg => {
     const block = el('div', 'subgroup-block');
+    block.dataset.sgid = sg.subgroup_id;
     const parts = sg.parts || [];
     const keys = parts.length ? Object.keys(parts[0]).filter(k => k !== 'ref_no') : [];
     const headerDiv = el('div', 'subgroup-header');
@@ -288,7 +310,12 @@ function renderParts(data) {
       ['Ref', ...keys].forEach(k => { const th = document.createElement('th'); th.textContent = k.replace(/_/g,' '); headerRow.appendChild(th); });
       thead.appendChild(headerRow); table.appendChild(thead);
       const tbody = document.createElement('tbody');
-      parts.forEach(p => { const tr = document.createElement('tr'); [p.ref_no||'--', ...keys.map(k => p[k]||'--')].forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); }); tbody.appendChild(tr); });
+      parts.forEach(p => {
+        const tr = document.createElement('tr');
+        if (p.part_number) tr.dataset.partNum = p.part_number;
+        [p.ref_no||'--', ...keys.map(k => p[k]||'--')].forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+        tbody.appendChild(tr);
+      });
       table.appendChild(tbody); tableWrap.appendChild(table); block.appendChild(tableWrap);
     }
     wrap.appendChild(block);
