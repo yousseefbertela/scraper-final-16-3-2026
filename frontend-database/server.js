@@ -385,6 +385,7 @@ app.get('/api/cars/:typeCode/search', async (req, res) => {
   try {
     const q = (req.query.q || '').toLowerCase().trim();
     if (q.length < 2) return res.json({ results: [] });
+    const terms = q.split(/\s+/).filter(Boolean);
 
     const car = await getCarData(req.params.typeCode);
     if (!car) return res.status(404).json({ error: 'Car not found' });
@@ -393,7 +394,8 @@ app.get('/api/cars/:typeCode/search', async (req, res) => {
     for (const [gId, group] of Object.entries(car.groups || {})) {
       for (const [sgId, sg] of Object.entries(group.subgroups || {})) {
         for (const part of (sg.parts || [])) {
-          if (JSON.stringify(part).toLowerCase().includes(q)) {
+          const hay = JSON.stringify(part).toLowerCase();
+          if (terms.every(t => hay.includes(t))) {
             results.push({
               group_id:      gId,
               group_name:    group.group_name,
@@ -419,6 +421,7 @@ app.get('/api/search', async (req, res) => {
   try {
     const q = (req.query.q || '').toLowerCase().trim();
     if (q.length < 2) return res.json({ results: [] });
+    const terms = q.split(/\s+/).filter(Boolean);
 
     const cars = await getAllCarsData();
     const results = [];
@@ -428,7 +431,8 @@ app.get('/api/search', async (req, res) => {
       for (const [gId, group] of Object.entries(car.groups || {})) {
         for (const [sgId, sg] of Object.entries(group.subgroups || {})) {
           for (const part of (sg.parts || [])) {
-            if (JSON.stringify(part).toLowerCase().includes(q)) {
+            const hay = JSON.stringify(part).toLowerCase();
+            if (terms.every(t => hay.includes(t))) {
               results.push({
                 type_code:     typeCode,
                 model:         car.model,
