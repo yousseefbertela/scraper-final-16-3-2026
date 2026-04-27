@@ -65,6 +65,12 @@ async function submitPassword() {
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
+let _bttScrollEl = null;
+function _bttScroll() {
+  const btn = $('back-to-top');
+  if (!btn || !_bttScrollEl) return;
+  btn.classList.toggle('visible', _bttScrollEl.scrollTop > 320);
+}
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -76,6 +82,9 @@ function showView(name) {
   updateBreadcrumb();
   const scraperNav = $('scraper-nav');
   if (scraperNav) scraperNav.style.display = name === 'target' ? 'block' : 'none';
+  if (_bttScrollEl) _bttScrollEl.removeEventListener('scroll', _bttScroll);
+  _bttScrollEl = v || null;
+  if (_bttScrollEl) { _bttScrollEl.addEventListener('scroll', _bttScroll, { passive: true }); _bttScroll(); }
 }
 function updateBreadcrumb() {
   const map = { dashboard:'Overview', catalog:'Catalog', search:'Part Search', groups:'Groups', parts:'Parts' };
@@ -147,6 +156,7 @@ async function openCar(typeCode) {
   $('car-search-results').innerHTML = '';
   $('car-search-results').style.display = 'none';
   $('groups-section-title').style.display = '';
+  $('groups-list').style.display = '';
   showView('groups');
   try {
     const car = await api('/api/cars/' + encodeURIComponent(typeCode));
@@ -841,6 +851,7 @@ $('password-input').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitPassword();
   if (e.key === 'Escape') $('password-cancel').click();
 });
+$('back-to-top').addEventListener('click', () => { if (_bttScrollEl) _bttScrollEl.scrollTo({ top: 0, behavior: 'smooth' }); });
 updateAdminBtn();
 initModal();
 initSearch();
