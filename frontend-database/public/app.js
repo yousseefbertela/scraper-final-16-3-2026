@@ -284,7 +284,7 @@ function scrollToAndHighlightPart(partNum, sgId) {
   setTimeout(() => {
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     target.classList.add('part-flash');
-    setTimeout(() => target.classList.remove('part-flash'), 2000);
+    setTimeout(() => target.classList.remove('part-flash'), 10000);
   }, 80);
 }
 
