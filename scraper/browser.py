@@ -28,15 +28,37 @@ _PROXY_SERVERS = [s.strip() for s in os.environ.get("PROXY_SERVERS", "").split("
 _PROXY_USERNAME = os.environ.get("PROXY_USERNAME") or None
 _PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD") or None
 _proxy_cursor = 0
+_current_proxy = None
+# Not every exit passes Cloudflare (2026-09-20: Webshare exit #1 fine, #2 challenged
+# on every request). Remember blocked ones and skip them for a cooldown.
+_PROXY_BLOCK_COOLDOWN_S = int(os.environ.get("PROXY_BLOCK_COOLDOWN_S", "1800"))
+_blocked_proxies: dict = {}   # server -> time.time() when last blocked
 
 
 def _next_proxy():
-    global _proxy_cursor
+    global _proxy_cursor, _current_proxy
     if not _PROXY_SERVERS:
+        _current_proxy = None
         return None
-    server = _PROXY_SERVERS[_proxy_cursor % len(_PROXY_SERVERS)]
-    _proxy_cursor += 1
-    return {"server": f"http://{server}", "username": _PROXY_USERNAME, "password": _PROXY_PASSWORD}
+    now = time.time()
+    chosen = None
+    for _ in range(len(_PROXY_SERVERS)):
+        server = _PROXY_SERVERS[_proxy_cursor % len(_PROXY_SERVERS)]
+        _proxy_cursor += 1
+        if now - _blocked_proxies.get(server, 0) > _PROXY_BLOCK_COOLDOWN_S:
+            chosen = server
+            break
+    if chosen is None:
+        chosen = min(_PROXY_SERVERS, key=lambda s: _blocked_proxies.get(s, 0))
+        logger.warning(f"All {len(_PROXY_SERVERS)} proxies recently blocked; retrying {chosen}")
+    _current_proxy = chosen
+    return {"server": f"http://{chosen}", "username": _PROXY_USERNAME, "password": _PROXY_PASSWORD}
+
+
+def mark_current_proxy_blocked():
+    if _current_proxy:
+        _blocked_proxies[_current_proxy] = time.time()
+        logger.warning(f"Proxy {_current_proxy} marked blocked for {_PROXY_BLOCK_COOLDOWN_S}s")
 
 
 class BrowserCrashError(RuntimeError):
@@ -190,8 +212,14 @@ def wait_for_no_cloudflare(page: Page, timeout: int = 60):
                 return
         elapsed = time.time() - start
         if elapsed > timeout:
-            raise TimeoutError(
-                f"Cloudflare challenge did not clear within {timeout}s."
+            # A challenge that never clears is the exit IP being refused, not a
+            # slow page. Raising BrowserCrashError makes main.py relaunch the
+            # browser — which rotates to the next (non-blocked) proxy — and
+            # resume this car from its checkpoint.
+            mark_current_proxy_blocked()
+            raise BrowserCrashError(
+                f"Cloudflare challenge did not clear within {timeout}s "
+                f"on proxy {_current_proxy or 'direct'}"
             )
         logger.warning(
             f"Cloudflare challenge active, waiting... ({elapsed:.0f}s elapsed)"
