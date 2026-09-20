@@ -4,9 +4,25 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const express = require('express');
 const { Pool } = require('pg');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const adminSessions = new Map();
+const ADMIN_SESSION_MS = 8 * 60 * 60 * 1000;
+const VIN_SCRAPER_BASE = (process.env.SCRAPER_BASE_URL ||
+  'https://cloud-vin-scraper-realoem-abaml.ondigitalocean.app').replace(/\/$/, '');
+const VIN_LOOKUP_TIMEOUT_MS = Number(process.env.SCRAPER_VIN_LOOKUP_TIMEOUT_MS || 155000);
+
+function requireAdmin(req, res, next) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const expiresAt = adminSessions.get(token);
+  if (!token || !expiresAt || expiresAt < Date.now()) {
+    if (token) adminSessions.delete(token);
+    return res.status(401).json({ error: 'Admin authentication required' });
+  }
+  next();
+}
 
 /**
  * pg v8+ / pg-connection-string: sslmode=require is treated like verify-full unless
@@ -213,8 +229,140 @@ app.post('/api/auth', express.json(), (req, res) => {
   const { password } = req.body || {};
   const correct = process.env.ADMIN_PASSWORD;
   if (!correct) return res.status(503).json({ error: 'ADMIN_PASSWORD env var not set' });
-  if (password === correct) return res.json({ ok: true });
+  if (password === correct) {
+    const token = crypto.randomBytes(32).toString('hex');
+    adminSessions.set(token, Date.now() + ADMIN_SESSION_MS);
+    return res.json({ ok: true, token, expires_in: ADMIN_SESSION_MS / 1000 });
+  }
   return res.status(401).json({ ok: false, error: 'Incorrect password' });
+});
+
+function parseJson(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+async function catalogImportStatus(rawCode) {
+  const code = String(rawCode || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{4}$/.test(code)) throw new Error('Type code must be exactly 4 letters or numbers');
+  const [catalog, checkpoints, lists] = await Promise.all([
+    pool.query('SELECT content FROM scraped_files WHERE filename=$1 LIMIT 1', [code]),
+    pool.query('SELECT scraper_id, checkpoint_data FROM scraper_checkpoints ORDER BY scraper_id'),
+    pool.query('SELECT scraper_id, car_data FROM scraper_car_lists ORDER BY scraper_id'),
+  ]);
+  for (const row of checkpoints.rows) {
+    const cp = parseJson(row.checkpoint_data, {});
+    const key = Object.keys(cp.cars || {}).find(k => k.toUpperCase().startsWith(code));
+    const entry = key && cp.cars[key];
+    if (entry && !entry.completed) {
+      const done = (entry.completed_groups || []).length;
+      const total = Number(entry.total_groups || 0);
+      return { type_code: code, catalog_key: key, status: 'scraping', completed_groups: done,
+        total_groups: total || null, percent: total ? Math.min(99, Math.round(done / total * 100)) : null,
+        current_group: entry.in_progress_group || null, scraper_id: row.scraper_id };
+    }
+  }
+  if (catalog.rows[0]) {
+    const content = parseJson(catalog.rows[0].content, {});
+    const key = Object.keys(content).find(k => k.toUpperCase().startsWith(code));
+    if (key) {
+      const car = content[key];
+      const total = Object.keys(car.groups || {}).length;
+      return { type_code: code, catalog_key: key, status: 'available', completed_groups: total,
+        total_groups: total, percent: 100, car: { model: car.model || '', series: car.series_label || car.series_value || '', engine: car.engine || '' } };
+    }
+  }
+  for (const row of lists.rows) {
+    const car = parseJson(row.car_data, []).find(c => String(c.code || '').toUpperCase() === code);
+    if (car) return { type_code: code, catalog_key: car.type_code_full || null, status: 'queued',
+      completed_groups: 0, total_groups: null, percent: 0, scraper_id: row.scraper_id, car };
+  }
+  return { type_code: code, catalog_key: null, status: 'missing', completed_groups: 0, total_groups: null, percent: 0 };
+}
+
+app.get('/api/catalog-lookup/:typeCode', async (req, res) => {
+  try { res.json(await catalogImportStatus(req.params.typeCode)); }
+  catch (e) { res.status(/exactly 4/.test(e.message) ? 400 : 500).json({ error: e.message }); }
+});
+
+app.get('/api/vin-lookup/:vin', async (req, res) => {
+  const enteredVin = String(req.params.vin || '').trim().toUpperCase();
+  if (!/^([A-Z0-9]{7}|[A-Z0-9]{17})$/.test(enteredVin)) {
+    return res.status(400).json({ error: 'VIN must be the last 7 characters or the full 17 characters' });
+  }
+  const serial = enteredVin.slice(-7);
+  try {
+    const response = await fetch(`${VIN_SCRAPER_BASE}/type-code`, {
+      headers: { 'x-vin-serial': serial },
+      signal: AbortSignal.timeout(VIN_LOOKUP_TIMEOUT_MS),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return res.status(response.status === 404 ? 404 : 502).json({
+        error: data.message || data.error || `VIN resolver returned ${response.status}`,
+      });
+    }
+    const details = data.details || {};
+    if (!data.typeCode) return res.status(404).json({ error: 'No BMW type code was found for this VIN' });
+    return res.json({
+      vin: enteredVin,
+      serial,
+      type_code: String(data.typeCode).toUpperCase(),
+      type_code_full: data.typeCodeFull || details.typeCodeFull || '',
+      vehicle_description: data.vehicleDescription || '',
+      series: details.series || '', model: details.model || '', body: details.body || '',
+      engine: details.engine || '', prod_month: details.prodMonth || '', market: details.market || '',
+    });
+  } catch (e) {
+    const timeout = e.name === 'TimeoutError' || e.name === 'AbortError';
+    return res.status(504).json({ error: timeout ? 'VIN lookup timed out. Please try again.' : `VIN lookup failed: ${e.message}` });
+  }
+});
+
+app.post('/api/catalog-import', requireAdmin, express.json(), async (req, res) => {
+  const v = req.body || {};
+  const code = String(v.type_code || '').trim().toUpperCase();
+  try {
+    const before = await catalogImportStatus(code);
+    if (before.status !== 'missing') return res.json(before);
+    if (!v.type_code_full && !(v.series && v.model && v.body && v.engine)) {
+      return res.status(400).json({ error: 'Provide the full RealOEM ID, or series, model, body and engine.' });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const rows = await client.query('SELECT scraper_id, car_data FROM scraper_car_lists ORDER BY scraper_id FOR UPDATE');
+      if (!rows.rows.length) throw new Error('No scraper queues configured');
+      const queues = rows.rows.map(row => ({ row, cars: parseJson(row.car_data, []) }));
+      const duplicate = queues.some(q => q.cars.some(c => String(c.code || '').toUpperCase() === code));
+      if (!duplicate) {
+        queues.sort((a, b) => a.cars.filter(c => !c.scraped).length - b.cars.filter(c => !c.scraped).length || a.row.scraper_id - b.row.scraper_id);
+        const target = queues[0];
+        const idParts = String(v.type_code_full || '').split('-');
+        const idMeta = idParts.length >= 7 ? {
+          market: idParts[1], prodMonth: `${idParts[3]}${idParts[2]}`,
+          series: idParts[4], brand: idParts[5], model: idParts.slice(6).join('-'),
+        } : {};
+        const prod = String(v.prod_month || idMeta.prodMonth || '').replace(/\D/g, '');
+        const brand = idMeta.brand || (/mini/i.test(`${v.brand || ''} ${v.model || ''} ${v.series || ''}`) ? 'MINI' : 'BMW');
+        target.cars.push({
+          num: target.cars.reduce((m, c) => Math.max(m, Number(c.num) || 0), 0) + 1,
+          code, brand, model: v.model || idMeta.model || '', series: v.series || idMeta.series || '', body: v.body || '',
+          engine: v.engine || '', market: v.market || idMeta.market || 'EUR', prod_month: prod,
+          type_code_full: v.type_code_full || '', requested_at: new Date().toISOString(), requested_by: 'catalog-ui',
+          custom: { col_1775163870194_93n2x: v.series || idMeta.series || '', col_1775163882980_nr3xh: v.body || '',
+            col_1775163897641_k0d2n: v.steering || '', col_1775163979435_jilnc: prod,
+            col_1775163999384_4jryt: brand, col_1775164005280_2rqu5: v.catalog || 'Current' },
+        });
+        await client.query('UPDATE scraper_car_lists SET car_data=$1 WHERE scraper_id=$2', [JSON.stringify(target.cars), target.row.scraper_id]);
+      }
+      await client.query('COMMIT');
+      listCache = null; listTime = null;
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+    finally { client.release(); }
+    res.status(202).json(await catalogImportStatus(code));
+  } catch (e) { res.status(/exactly 4|Provide/.test(e.message) ? 400 : 500).json({ error: e.message }); }
 });
 
 app.get('/api/overview', async (req, res) => {

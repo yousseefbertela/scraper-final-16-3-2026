@@ -76,6 +76,28 @@ html, body { height: 100%; font-family: Inter, system-ui, sans-serif; background
 .stat-label { font-size: 11px; color: var(--text3); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
 .car-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
 .car-grid-small { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 16px; }
+.typecode-lookup { display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px 20px;margin-bottom:14px;background:linear-gradient(120deg,rgba(29,111,232,.13),rgba(29,111,232,.03));border:1px solid rgba(29,111,232,.28);border-radius:12px; }
+.typecode-lookup-copy { display:flex;flex-direction:column;gap:3px;color:var(--text3);font-size:12px; }
+.typecode-lookup-copy strong { color:var(--text);font-size:15px; }
+.eyebrow { color:var(--blue);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.14em; }
+.typecode-lookup-form { display:flex;gap:8px;flex-shrink:0; }
+.typecode-lookup-form input,.import-field input,.import-field select { background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--text);padding:9px 11px;outline:none;font-family:inherit; }
+.typecode-lookup-form input { width:120px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;font-weight:700;letter-spacing:.12em; }
+.typecode-lookup-form input:focus,.import-field input:focus,.import-field select:focus { border-color:var(--blue); }
+.typecode-lookup-form button,.catalog-action { border:1px solid rgba(29,111,232,.4);background:rgba(29,111,232,.16);color:#6baeff;border-radius:7px;padding:8px 14px;font:600 12px inherit;cursor:pointer; }
+.catalog-lookup-card { margin-bottom:20px;padding:18px 20px;background:var(--bg2);border:1px solid var(--border);border-radius:12px; }
+.catalog-lookup-head { display:flex;align-items:center;justify-content:space-between;gap:16px; }
+.catalog-lookup-code { font:700 18px 'JetBrains Mono',monospace;color:var(--blue);letter-spacing:.08em; }
+.catalog-lookup-status { margin-top:5px;color:var(--text2);font-size:13px; }
+.catalog-progress { height:7px;margin-top:16px;background:var(--bg4);border-radius:99px;overflow:hidden; }
+.catalog-progress > span { display:block;height:100%;background:linear-gradient(90deg,var(--blue),#6baeff);border-radius:inherit;transition:width .5s ease; }
+.catalog-progress-meta { display:flex;justify-content:space-between;margin-top:7px;color:var(--text3);font-size:11px; }
+.import-form { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:18px;padding-top:18px;border-top:1px solid var(--border); }
+.import-field { display:flex;flex-direction:column;gap:5px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.06em; }
+.import-field.full { grid-column:1/-1; }
+.import-actions { grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;align-items:center; }
+.import-error { color:#f87171;font-size:12px;margin-right:auto; }
+@media(max-width:700px){.typecode-lookup{align-items:stretch;flex-direction:column}.typecode-lookup-form input{width:100%;}.typecode-lookup-form{width:100%}.typecode-lookup-form button{flex:0 0 auto}.import-form{grid-template-columns:1fr}.import-field.full,.import-actions{grid-column:auto}}
 .car-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; cursor: pointer; transition: border-color 0.15s, background 0.15s; position: relative; overflow: hidden; }
 .car-card:hover { border-color: var(--blue); background: var(--bg3); }
 .car-card-model { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 3px; }

@@ -144,6 +144,7 @@ def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
     if not groups:
         logger.warning(f"No groups found for {type_code}")
         return 0
+    checkpoint_manager.set_total_groups(car, len(groups))
     total_parts = 0
     for group in groups:
         mg = group["mg"]

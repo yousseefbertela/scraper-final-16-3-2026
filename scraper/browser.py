@@ -2,6 +2,7 @@
 Browser setup with anti-detection measures.
 """
 
+import os
 import random
 import time
 import logging
@@ -17,6 +18,24 @@ _USER_AGENT = (
 )
 
 _virtual_display = None
+
+# Optional outbound proxy. RealOEM's Cloudflare hard-blocks datacenter egress
+# IPs (seen on DigitalOcean from 2026-09-05) while the same browser passes from
+# a residential/proxy IP. PROXY_SERVERS is a comma-separated host:port list;
+# each browser launch rotates to the next one. Unset = direct, as before.
+_PROXY_SERVERS = [s.strip() for s in os.environ.get("PROXY_SERVERS", "").split(",") if s.strip()]
+_PROXY_USERNAME = os.environ.get("PROXY_USERNAME") or None
+_PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD") or None
+_proxy_cursor = 0
+
+
+def _next_proxy():
+    global _proxy_cursor
+    if not _PROXY_SERVERS:
+        return None
+    server = _PROXY_SERVERS[_proxy_cursor % len(_PROXY_SERVERS)]
+    _proxy_cursor += 1
+    return {"server": f"http://{server}", "username": _PROXY_USERNAME, "password": _PROXY_PASSWORD}
 
 
 class BrowserCrashError(RuntimeError):
@@ -58,8 +77,12 @@ def stop_virtual_display():
 # ------------------------------------------------------------------ #
 
 def launch_browser(playwright_instance) -> tuple:
+    proxy = _next_proxy()
+    if proxy:
+        logger.info(f"Launching browser via proxy {proxy['server']}")
     browser: Browser = playwright_instance.chromium.launch(
         headless=False,
+        proxy=proxy,
         args=[
             "--disable-blink-features=AutomationControlled",
             "--no-sandbox",

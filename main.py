@@ -2,7 +2,9 @@
 import argparse
 import gc
 import logging
+import os
 import sys
+import time
 
 from playwright.sync_api import sync_playwright
 
@@ -20,6 +22,12 @@ from storage.progress import ProgressWriter
 
 # Restart browser every N cars to reset memory
 BROWSER_RESTART_EVERY = 4
+
+# On-demand worker mode: when the queue is empty, sleep this long and re-check
+# instead of exiting. 0 (default) keeps the one-shot behaviour for local runs.
+# Set on the DigitalOcean worker so it idles cheaply between PartPilot requests
+# rather than being restarted (Xvfb + Chromium launch) every time it exits.
+IDLE_POLL_SECONDS = int(os.environ.get("IDLE_POLL_SECONDS", "0"))
 
 # Sample car for --sample mode (navigates directly, no dropdown enumeration)
 _SAMPLE_CAR = {
@@ -135,6 +143,16 @@ def main():
         while True:
             session += 1
             scraped_prefixes = checkpoint.get_done_prefixes()
+
+            # Check the queue before paying for a browser launch.
+            if not _get_remaining_cars(sample_mode, scraped_prefixes, checkpoint):
+                if IDLE_POLL_SECONDS > 0:
+                    logger.info(f"Queue empty — re-checking in {IDLE_POLL_SECONDS}s")
+                    time.sleep(IDLE_POLL_SECONDS)
+                    continue
+                logger.info("All assigned cars scraped! Scraper done.")
+                break
+
             logger.info(
                 f"Browser session {session} — "
                 f"{len(scraped_prefixes)} prefixes done so far"
@@ -167,7 +185,10 @@ def main():
                         else:
                             code = car_info["code"]
                             type_code_map = checkpoint.data.setdefault("type_code_map", {})
-                            type_code_full = type_code_map.get(code)
+                            # PartPilot's VIN resolver can enqueue the exact RealOEM
+                            # catalog id. Prefer it so on-demand imports do not have
+                            # to reverse-engineer dropdown selections from metadata.
+                            type_code_full = car_info.get("type_code_full") or type_code_map.get(code)
 
                             if not type_code_full:
                                 logger.info(f"Navigating RealOEM to find type_code for {code}")

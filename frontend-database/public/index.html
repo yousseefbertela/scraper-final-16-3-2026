@@ -76,6 +76,18 @@
     <section id="view-catalog" class="view">
       <div class="page-title" id="catalog-title">Select a Vehicle</div>
       <div id="catalog-content">
+        <div class="typecode-lookup">
+          <div class="typecode-lookup-copy">
+            <span class="eyebrow">Direct lookup</span>
+            <strong>Find a catalog by VIN or type code</strong>
+            <span>Enter a full VIN, its last 7 characters, or a 4-character type code.</span>
+          </div>
+          <form id="typecode-lookup-form" class="typecode-lookup-form">
+            <input id="typecode-lookup-input" maxlength="17" placeholder="VIN / last 7 / type code" autocomplete="off" spellcheck="false" />
+            <button type="submit">Search</button>
+          </form>
+        </div>
+        <div id="typecode-lookup-result"></div>
         <div class="hint">Choose a vehicle from Overview, or select below.</div>
         <div id="catalog-car-list" class="car-grid-small"></div>
       </div>

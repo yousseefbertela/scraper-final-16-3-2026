@@ -7,6 +7,8 @@ let state = { view: 'dashboard', currentCar: null, currentGroup: null, overviewD
 
 // ── Admin / Auth ───────────────────────────────────────────────────────────────
 let isAdmin = sessionStorage.getItem('bmw_admin') === '1';
+let adminToken = sessionStorage.getItem('bmw_admin_token') || '';
+if (isAdmin && !adminToken) isAdmin = false;
 
 function updateAdminBtn() {
   const btn = $('admin-btn');
@@ -24,6 +26,8 @@ function toggleAdmin() {
   if (isAdmin) {
     isAdmin = false;
     sessionStorage.removeItem('bmw_admin');
+    sessionStorage.removeItem('bmw_admin_token');
+    adminToken = '';
     updateAdminBtn();
     if (state.view === 'target') loadTargetList();
     toast('Switched to read-only mode');
@@ -49,6 +53,8 @@ async function submitPassword() {
     if (data.ok) {
       isAdmin = true;
       sessionStorage.setItem('bmw_admin', '1');
+      adminToken = data.token || '';
+      sessionStorage.setItem('bmw_admin_token', adminToken);
       $('password-overlay').classList.remove('open');
       updateAdminBtn();
       if (state.view === 'target') loadTargetList();
@@ -506,9 +512,22 @@ async function doMoveCar(fromId, code, toId) {
 
 async function apiMutate(method, path, body) {
   const opts = { method };
-  if (body !== undefined) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+  opts.headers = adminToken ? { Authorization: 'Bearer ' + adminToken } : {};
+  if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const r = await fetch(path, opts);
-  if (!r.ok) { const t = await r.text(); let msg = t; try { msg = JSON.parse(t).error || t; } catch(_){} throw new Error(msg); }
+  if (!r.ok) {
+    const t = await r.text(); let msg = t;
+    try { msg = JSON.parse(t).error || t; } catch(_){}
+    if (r.status === 401) {
+      isAdmin = false;
+      adminToken = '';
+      sessionStorage.removeItem('bmw_admin');
+      sessionStorage.removeItem('bmw_admin_token');
+      updateAdminBtn();
+      msg = 'Admin session expired. Enter the password again.';
+    }
+    throw new Error(msg);
+  }
   return r.json();
 }
 function escHtml(s) {
@@ -791,6 +810,103 @@ function buildAddCarRow(scraperId) {
   return row;
 }
 
+// ── Direct type-code lookup + on-demand import ───────────────────────────────
+let catalogPollTimer = null;
+const catalogResolvedVehicles = new Map();
+
+function importProgressCard(job) {
+  const pct = Number.isFinite(job.percent) ? job.percent : 12;
+  const label = job.status === 'queued'
+    ? 'Queued — waiting for an importer'
+    : 'Importing group ' + (job.current_group || '…');
+  const count = job.total_groups
+    ? job.completed_groups + ' / ' + job.total_groups + ' groups'
+    : job.completed_groups + ' groups complete';
+  return '<div class="catalog-lookup-card"><div class="catalog-lookup-head"><div><div class="catalog-lookup-code">' + escapeHtml(job.type_code) + '</div><div class="catalog-lookup-status">' + escapeHtml(label) + '</div></div><span class="status-badge badge-pending">First import · 5–15 min</span></div><div class="catalog-progress"><span style="width:' + pct + '%"></span></div><div class="catalog-progress-meta"><span>' + escapeHtml(count) + '</span><span>' + (Number.isFinite(job.percent) ? job.percent + '%' : 'Starting…') + '</span></div></div>';
+}
+
+function renderImportForm(code) {
+  return '<div class="catalog-lookup-card"><div class="catalog-lookup-head"><div><div class="catalog-lookup-code">' + escapeHtml(code) + '</div><div class="catalog-lookup-status">No parts catalog exists for this type code yet.</div></div><span class="status-badge badge-pending">Missing</span></div>' +
+    '<form id="catalog-import-form" class="import-form">' +
+    '<label class="import-field full">Full RealOEM ID (fastest and exact)<input name="type_code_full" placeholder="JA31-EUR-03-2018-G30-BMW-520i" /></label>' +
+    '<label class="import-field">Series label<input name="series" placeholder="5\' G30" /></label>' +
+    '<label class="import-field">Model<input name="model" placeholder="520i" /></label>' +
+    '<label class="import-field">Body<input name="body" placeholder="Lim" /></label>' +
+    '<label class="import-field">Engine<input name="engine" placeholder="B48" /></label>' +
+    '<label class="import-field">Market<select name="market"><option>EUR</option><option>EGY</option><option>USA</option></select></label>' +
+    '<label class="import-field">Production month<input name="prod_month" placeholder="201803" /></label>' +
+    '<div class="import-actions"><span id="catalog-import-error" class="import-error"></span><button class="catalog-action" type="submit">Scrape &amp; import car</button></div></form></div>';
+}
+
+function fillImportForm(vehicle) {
+  const form = $('catalog-import-form');
+  if (!form || !vehicle) return;
+  const values = {
+    type_code_full: vehicle.type_code_full, series: vehicle.series,
+    model: vehicle.model, body: vehicle.body, engine: vehicle.engine,
+    market: vehicle.market, prod_month: vehicle.prod_month,
+  };
+  for (const [name, value] of Object.entries(values)) {
+    const field = form.elements.namedItem(name);
+    if (field && value) field.value = value;
+  }
+}
+
+async function lookupTypeCode(code, resolvedVehicle) {
+  clearTimeout(catalogPollTimer);
+  if (resolvedVehicle) catalogResolvedVehicles.set(code, resolvedVehicle);
+  const vehicle = resolvedVehicle || catalogResolvedVehicles.get(code) || null;
+  const result = $('typecode-lookup-result');
+  result.innerHTML = loadingHTML();
+  try {
+    const job = await api('/api/catalog-lookup/' + encodeURIComponent(code));
+    if (job.status === 'available') {
+      const vinNote = vehicle?.vin ? ' · VIN ' + escapeHtml(vehicle.serial || vehicle.vin.slice(-7)) : '';
+      result.innerHTML = '<div class="catalog-lookup-card"><div class="catalog-lookup-head"><div><div class="catalog-lookup-code">' + escapeHtml(code) + '</div><div class="catalog-lookup-status">Catalog ready' + (job.car?.model ? ' · ' + escapeHtml(job.car.model) : '') + vinNote + '</div></div><button id="open-found-car" class="catalog-action">Open catalog</button></div></div>';
+      $('open-found-car').addEventListener('click', function() { openCar(job.catalog_key); });
+      state.overviewData = null;
+    } else if (job.status === 'queued' || job.status === 'scraping') {
+      result.innerHTML = importProgressCard(job);
+      catalogPollTimer = setTimeout(function() { lookupTypeCode(code); }, 5000);
+    } else if (!isAdmin) {
+      result.innerHTML = '<div class="catalog-lookup-card"><div class="catalog-lookup-head"><div><div class="catalog-lookup-code">' + escapeHtml(code) + '</div><div class="catalog-lookup-status">No catalog found. Unlock Admin Mode to start the first import.</div></div><button id="unlock-for-import" class="catalog-action">Enter password</button></div></div>';
+      $('unlock-for-import').addEventListener('click', toggleAdmin);
+    } else {
+      result.innerHTML = renderImportForm(code);
+      fillImportForm(vehicle);
+      $('catalog-import-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const button = e.target.querySelector('button[type="submit"]');
+        const form = new FormData(e.target);
+        const payload = { type_code: code };
+        for (const [key, value] of form.entries()) payload[key] = String(value).trim();
+        button.disabled = true; button.textContent = 'Queuing…';
+        try {
+          const queued = await apiMutate('POST', '/api/catalog-import', payload);
+          result.innerHTML = importProgressCard(queued);
+          catalogPollTimer = setTimeout(function() { lookupTypeCode(code); }, 3000);
+        } catch (err) {
+          $('catalog-import-error').textContent = err.message;
+          button.disabled = false; button.textContent = 'Scrape & import car';
+        }
+      });
+    }
+  } catch (e) { result.innerHTML = errorHTML(e.message); }
+}
+
+async function lookupVin(vin) {
+  clearTimeout(catalogPollTimer);
+  const result = $('typecode-lookup-result');
+  result.innerHTML = '<div class="catalog-lookup-card vin-resolving"><div class="catalog-lookup-head"><div><div class="catalog-lookup-code">' + escapeHtml(vin.slice(-7)) + '</div><div class="catalog-lookup-status">Reading VIN with PartPilot’s BMW resolver…</div></div><span class="status-badge badge-pending">Usually 1–2 min</span></div><div class="catalog-progress"><span style="width:22%"></span></div></div>';
+  try {
+    const vehicle = await api('/api/vin-lookup/' + encodeURIComponent(vin));
+    const code = vehicle.type_code;
+    $('typecode-lookup-input').value = code;
+    toast('VIN resolved to type code ' + code);
+    await lookupTypeCode(code, vehicle);
+  } catch (e) { result.innerHTML = errorHTML(e.message); }
+}
+
 // ── Modal ──────────────────────────────────────────────────────────────────────
 function initModal() {
   const overlay = document.createElement('div');
@@ -816,6 +932,14 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 });
 $('back-to-catalog').addEventListener('click', () => { showView('catalog'); loadCatalog(); });
 $('back-to-groups').addEventListener('click', () => { if (state.currentCar) openCar(state.currentCar.type_code); else showView('groups'); });
+$('typecode-lookup-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const query = $('typecode-lookup-input').value.replace(/\s/g, '').toUpperCase();
+  $('typecode-lookup-input').value = query;
+  if (/^[A-Z0-9]{4}$/.test(query)) return lookupTypeCode(query);
+  if (/^([A-Z0-9]{7}|[A-Z0-9]{17})$/.test(query)) return lookupVin(query);
+  toast('Enter a 4-character type code, 7-character VIN suffix, or full 17-character VIN');
+});
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 $('confirm-cancel').addEventListener('click', function() { $('confirm-overlay').classList.remove('open'); confirmCallback = null; });

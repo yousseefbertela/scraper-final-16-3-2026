@@ -62,6 +62,13 @@ class CheckpointManager:
         self.data["cars"][key]["in_progress_group"] = mg
         self._save()
 
+    def set_total_groups(self, car: dict, total: int):
+        """Persist the denominator used by both PartPilot progress bars."""
+        key = car["type_code_full"]
+        self._ensure(key)
+        self.data["cars"][key]["total_groups"] = int(total)
+        self._save()
+
     def mark_group_done(self, car: dict, mg: str):
         key = car["type_code_full"]
         self._ensure(key)
@@ -101,6 +108,7 @@ class CheckpointManager:
                 "completed_groups": [],
                 "completed_subgroups": {},
                 "in_progress_group": None,
+                "total_groups": 0,
             }
         else:
             if "completed_subgroups" not in self.data["cars"][key]:
