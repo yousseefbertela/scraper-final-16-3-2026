@@ -78,6 +78,31 @@ class NotesWriter:
         self._update_summary()
         logger.info("Saved group to DB")
 
+    def prune_completed(self, done_type_codes) -> int:
+        """
+        Drop finished cars from memory (and therefore from the resume file).
+
+        Each finished car is already persisted under its own 4-char prefix key,
+        so the resume file only needs the cars still in progress. Without this,
+        a long-lived scraper carries every car it ever finished: scraper 1's
+        resume blob had reached 74 MB by 2026-09-20, and re-serialising all of
+        it on every group flush (plus Chromium) was OOM-killing a 1 GB worker
+        seconds after the first flush.
+        """
+        done = set(done_type_codes)
+        removed = 0
+        for series_key in list(self.data["data"].keys()):
+            models = self.data["data"][series_key].get("models", {})
+            for tc in list(models.keys()):
+                if tc in done:
+                    del models[tc]
+                    removed += 1
+            if not models:
+                del self.data["data"][series_key]
+        if removed:
+            logger.info(f"Pruned {removed} completed car(s) from in-memory notes")
+        return removed
+
     def get_car_dict(self, type_code_full: str):
         """Return a car metadata dict from already-saved notes (used to resume in-progress cars)."""
         for series_data in self.data["data"].values():

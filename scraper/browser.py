@@ -3,6 +3,7 @@ Browser setup with anti-detection measures.
 """
 
 import os
+import re
 import random
 import time
 import logging
@@ -107,6 +108,22 @@ def launch_browser(playwright_instance) -> tuple:
             ),
         },
     )
+    # Diagram URLs are read from <img src> in the HTML, never from the bytes, so
+    # skipping the downloads loses nothing. It removes most of the per-page
+    # transfer (the parts pages are text; the diagrams are the weight), which
+    # matters both for speed and for a metered proxy allowance.
+    _blocked_hosts = re.compile(
+        r"googletagmanager|google-analytics|doubleclick|facebook\.net|adsystem|adservice", re.I
+    )
+
+    def _skip_heavy_resources(route):
+        req = route.request
+        if req.resource_type in ("image", "font", "media") or _blocked_hosts.search(req.url):
+            return route.abort()
+        return route.continue_()
+
+    context.route("**/*", _skip_heavy_resources)
+
     page: Page = context.new_page()
     _PlaywrightStealth().apply_stealth_sync(page)
     page.set_default_timeout(45_000)   # 45s cap on ALL page ops incl. page.title()

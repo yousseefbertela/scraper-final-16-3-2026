@@ -135,6 +135,12 @@ def main():
     # --- Load checkpoint from DB (per-scraper, handled inside CheckpointManager) ---
     checkpoint = CheckpointManager(CHECKPOINT_FILE)
 
+    # Finished cars live under their own prefix keys already; keep only the
+    # in-progress ones in memory so each group flush stays small.
+    notes.prune_completed(
+        tc for tc, entry in checkpoint.data.get("cars", {}).items() if entry.get("completed")
+    )
+
     start_virtual_display()
 
     session = 0
