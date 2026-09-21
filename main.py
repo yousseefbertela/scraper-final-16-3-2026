@@ -14,7 +14,7 @@ from config import SCRAPER_ID
 from scraper.browser import (
     launch_browser, start_virtual_display, stop_virtual_display, BrowserCrashError
 )
-from scraper.parts_scraper import get_main_groups, scrape_group
+from scraper.parts_scraper import get_main_groups, scrape_group, SKIP_GROUPS
 from storage import jobs
 from storage.progress import ProgressWriter
 import scaling
@@ -162,6 +162,9 @@ def _scrape_car_shared(page, car, progress, still_wanted=None) -> tuple:
     logger = logging.getLogger("main")
     tc = car["type_code_full"]
     groups_here = 0
+    # Jobs seeded before a group was added to SKIP_GROUPS would keep the car
+    # "unfinished" forever; drop them (also strips the group from the catalog).
+    jobs.drop_skipped(car, SKIP_GROUPS)
 
     while True:
         if still_wanted is not None and not still_wanted():
@@ -176,7 +179,16 @@ def _scrape_car_shared(page, car, progress, still_wanted=None) -> tuple:
         def on_subgroup(_diag_id, _mg=job["mg"]):
             return jobs.heartbeat(tc, _mg, INSTANCE_ID)
 
-        node, parts_count = scrape_group(page, car, job, on_subgroup=on_subgroup)
+        def on_slice(partial, _job=job):
+            # Persist a slice of a long group so a takeover resumes instead of restarting.
+            jobs.merge_group_into_catalog(car, _job, partial)
+            logger.info(f"{tc}: group {_job['mg']} — saved slice of {len(partial['subgroups'])} subgroups")
+
+        already = jobs.stored_subgroups(car, job["mg"])
+        node, parts_count = scrape_group(page, car, job, on_subgroup=on_subgroup,
+                                         skip_ids=already, on_slice=on_slice)
+        if page.is_closed():
+            page = page.context.pages[-1]  # scrape_group recycled the tab; keep using the live one
         if node is None:
             continue  # reassigned while we were slow; whoever owns it now will merge it
         jobs.merge_group_into_catalog(car, job, node)
@@ -248,6 +260,18 @@ def main():
 
             # Bring the rest of the fleet up before spending time in a browser.
             scaling.on_work_found()
+
+            # Every group of every queued car already claimed by others? Then wait
+            # here instead of paying for a browser launch just to find that out.
+            def _needs_browser(ci):
+                tc = ci.get("type_code_full") if not sample_mode else ci["type_code_full"]
+                if not tc:
+                    return True  # legacy row: type code still to be discovered in a browser
+                return (not jobs.has_jobs(tc)) or jobs.has_claimable(tc)
+            if not any(_needs_browser(ci) for ci in remaining):
+                logger.info("Nothing to claim right now — waiting for other instances (30s)")
+                time.sleep(30)
+                continue
 
             need_restart = False
             interrupted = False

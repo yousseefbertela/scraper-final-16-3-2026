@@ -223,7 +223,14 @@ def merge_group_into_catalog(car: dict, group: dict, group_node: dict):
                     "groups": {},
                 }
                 data[tc] = node
-            node.setdefault("groups", {})[group["mg"]] = group_node
+            # Merge subgroup by subgroup: a long group is saved in slices, and a
+            # takeover resumes from what is already stored (2026-09-21: a
+            # 130-subgroup group restarted from zero every time its pod died).
+            groups = node.setdefault("groups", {})
+            existing = groups.get(group["mg"]) or {"group_name": group_node.get("group_name", group.get("name", "")), "subgroups": {}}
+            existing["group_name"] = group_node.get("group_name") or existing.get("group_name", "")
+            existing.setdefault("subgroups", {}).update(group_node.get("subgroups", {}))
+            groups[group["mg"]] = existing
             cur.execute("""
                 INSERT INTO scraped_files (filename, content, updated_at)
                 VALUES (%s, %s, NOW())
@@ -231,12 +238,86 @@ def merge_group_into_catalog(car: dict, group: dict, group_node: dict):
                     SET content = EXCLUDED.content, updated_at = NOW()
             """, (prefix, json.dumps(data, ensure_ascii=False)))
             conn.commit()
+            return set(existing["subgroups"].keys())
         finally:
             cur.execute("SELECT pg_advisory_unlock(%s)", (DO_ADVISORY_LOCK_KEY,))
             conn.commit()
             cur.close()
     finally:
         conn.close()
+
+
+def stored_subgroups(car: dict, mg: str) -> set:
+    """Subgroup ids already saved for this group (from earlier slices or a dead owner)."""
+    tc = car["type_code_full"]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT content FROM scraped_files WHERE filename = %s", (tc[:4],))
+            row = cur.fetchone()
+    if not row or not row[0]:
+        return set()
+    try:
+        node = json.loads(row[0]).get(tc) or {}
+        return set((node.get("groups", {}).get(mg) or {}).get("subgroups", {}).keys())
+    except Exception:
+        return set()
+
+
+def has_claimable(type_code_full: str, stale_seconds: int = STALE_CLAIM_SECONDS) -> bool:
+    """Cheap pre-check so idle instances don't launch a browser for nothing."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 1 FROM catalog_group_jobs
+                 WHERE type_code_full = %s
+                   AND (status = 'pending'
+                        OR (status = 'claimed' AND claimed_at < NOW() - make_interval(secs => %s)))
+                 LIMIT 1
+            """, (type_code_full, stale_seconds))
+            return cur.fetchone() is not None
+
+
+def drop_skipped(car: dict, skip_mgs) -> int:
+    """Remove job rows (and any stored data) for groups we no longer scrape."""
+    skip = sorted({m for m in (skip_mgs or ()) if m})
+    if not skip:
+        return 0
+    tc = car["type_code_full"]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM catalog_group_jobs WHERE type_code_full = %s AND mg = ANY(%s)", (tc, skip))
+            removed = cur.rowcount
+        conn.commit()
+    if removed:
+        logger.info(f"{tc}: dropped {removed} job(s) for skipped group(s) {', '.join(skip)}")
+        # Also strip the group from the catalog blob if a partial slice landed there.
+        from config import DO_ADVISORY_LOCK_KEY
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_advisory_lock(%s)", (DO_ADVISORY_LOCK_KEY,))
+            try:
+                cur.execute("SELECT content FROM scraped_files WHERE filename = %s", (tc[:4],))
+                row = cur.fetchone()
+                if row and row[0]:
+                    data = json.loads(row[0])
+                    node = data.get(tc) or {}
+                    changed = False
+                    for m in skip:
+                        if m in node.get("groups", {}):
+                            del node["groups"][m]
+                            changed = True
+                    if changed:
+                        cur.execute("UPDATE scraped_files SET content = %s, updated_at = NOW() WHERE filename = %s",
+                                    (json.dumps(data, ensure_ascii=False), tc[:4]))
+                conn.commit()
+            finally:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (DO_ADVISORY_LOCK_KEY,))
+                conn.commit()
+                cur.close()
+        finally:
+            conn.close()
+    return removed
 
 
 def update_summary(car: dict):

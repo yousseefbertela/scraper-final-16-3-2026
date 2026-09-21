@@ -5,7 +5,16 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from scraper.browser import safe_goto, human_delay, human_scroll, BrowserCrashError
 from config import BASE_URL, SUBGROUP_DELAY, GROUP_DELAY
+import os
 logger = logging.getLogger(__name__)
+
+# Main groups PartPilot never needs. 03 "Retrofitting / Conversion / Accessories"
+# is dealer add-ons (M Performance trim, floor mats, umbrellas) and by itself is
+# ~25% of a car's subgroups — decided 2026-09-21 to skip it for good.
+SKIP_GROUPS = {g.strip() for g in os.environ.get("SKIP_GROUPS", "03").split(",") if g.strip()}
+# Save a long group in slices this big, and open a fresh tab at the same time
+# (100+ page loads in one tab was enough to OOM-kill a 1 GB pod).
+SUBGROUP_SLICE = int(os.environ.get("SUBGROUP_SLICE", "25"))
 PARTGRP_URL   = BASE_URL + "/bmw/enUS/partgrp"
 SHOWPARTS_URL = BASE_URL + "/bmw/enUS/showparts"
 
@@ -24,7 +33,10 @@ def get_main_groups(page, type_code_full):
             name = a.get_text(strip=True)
             if mg and name and not any(g["mg"] == mg for g in groups):
                 groups.append({"mg": mg, "name": name})
-    logger.info(f"{type_code_full}: {len(groups)} main groups found")
+    skipped = [g["mg"] for g in groups if g["mg"] in SKIP_GROUPS]
+    groups = [g for g in groups if g["mg"] not in SKIP_GROUPS]
+    logger.info(f"{type_code_full}: {len(groups)} main groups found"
+                + (f" (skipping {', '.join(skipped)})" if skipped else ""))
     return groups
 
 def get_subgroups(page, type_code_full, mg):
@@ -133,19 +145,27 @@ def scrape_parts_table(page, type_code_full, diag_id):
     logger.debug(f"diagId={diag_id}: {len(parts)} parts parsed")
     return parts
 
-def scrape_group(page, car, group, on_subgroup=None):
+def scrape_group(page, car, group, on_subgroup=None, skip_ids=None, on_slice=None):
     """
     Scrape ONE main group and return (group_node, parts_count), where group_node
     is {"group_name", "subgroups": {diagId: {...}}} in the exact shape stored in
     scraped_files. Used by the parallel worker: each instance takes groups from
     the shared job table and merges the finished node into the catalog.
 
-    on_subgroup(diag_id) is called after every subgroup (heartbeat hook); if it
-    returns False the group was handed to another instance and we stop.
-    Raises BrowserCrashError so the caller can relaunch the browser.
+    skip_ids       subgroups already stored (resume after a takeover) — not re-scraped.
+    on_slice(node) called every SUBGROUP_SLICE subgroups with the subgroups scraped
+                   since the last call, so the caller can persist them; the tab is
+                   recycled at the same point to keep Chromium's memory flat.
+    on_subgroup(diag_id) called after every subgroup (heartbeat hook); if it returns
+                   False the group was handed to another instance and we stop —
+                   the function then returns (None, 0).
+    Raises BrowserCrashError for the caller to relaunch.
+    The returned node holds only what was scraped since the last slice; callers
+    merge, so nothing is lost.
     """
     type_code = car["type_code_full"]
     mg = group["mg"]
+    skip_ids = set(skip_ids or ())
     node = {"group_name": group["name"], "subgroups": {}}
     parts_total = 0
     try:
@@ -155,7 +175,11 @@ def scrape_group(page, car, group, on_subgroup=None):
     except Exception as e:
         logger.error(f"Error getting subgroups for group {mg}: {e}")
         subgroups = []
-    for subgroup in subgroups:
+    todo = [sg for sg in subgroups if sg["diagId"] not in skip_ids]
+    if skip_ids:
+        logger.info(f"Group {mg}: resuming — {len(subgroups) - len(todo)} of {len(subgroups)} subgroups already stored")
+    since_slice = 0
+    for subgroup in todo:
         diag_id = subgroup["diagId"]
         logger.info("  Subgroup %s: %s", diag_id, subgroup["name"])
         human_delay(SUBGROUP_DELAY)
@@ -178,10 +202,35 @@ def scrape_group(page, car, group, on_subgroup=None):
             entry["scrape_error"] = scrape_error
         node["subgroups"][diag_id] = entry
         parts_total += len(parts)
+        since_slice += 1
         if on_subgroup is not None and on_subgroup(diag_id) is False:
             logger.warning(f"Group {mg} was reassigned to another instance; abandoning it")
             return None, 0
+        if on_slice is not None and since_slice >= SUBGROUP_SLICE:
+            on_slice({"group_name": group["name"], "subgroups": dict(node["subgroups"])})
+            node["subgroups"].clear()
+            since_slice = 0
+            page = _recycle_tab(page)
     return node, parts_total
+
+
+def _recycle_tab(page):
+    """Open a fresh tab in the same context and close the old one (memory reset, cookies kept)."""
+    try:
+        ctx = page.context
+        fresh = ctx.new_page()
+        fresh.set_default_timeout(45_000)
+        try:
+            from playwright_stealth import Stealth
+            Stealth().apply_stealth_sync(fresh)
+        except Exception:
+            pass
+        page.close()
+        logger.debug("Recycled browser tab")
+        return fresh
+    except Exception as e:
+        logger.warning(f"Tab recycle failed ({e}); continuing with the old tab")
+        return page
 
 
 def scrape_car_parts(page, car, notes_writer, checkpoint_manager):

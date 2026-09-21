@@ -99,8 +99,14 @@ def _request(method, path, body=None):
         return json.loads(resp.read().decode("utf-8"))
 
 
+_deploy_in_progress = False
+
+
 def _get_spec():
-    return _request("GET", f"/apps/{DO_APP_ID}")["app"]["spec"]
+    global _deploy_in_progress
+    app = _request("GET", f"/apps/{DO_APP_ID}")["app"]
+    _deploy_in_progress = bool(app.get("in_progress_deployment"))
+    return app["spec"]
 
 
 def _find_worker(spec):
@@ -113,6 +119,12 @@ def _find_worker(spec):
     if w.get("instance_size_slug") != EXPECTED_SIZE_SLUG:
         _disable(f"worker size is {w.get('instance_size_slug')}, expected {EXPECTED_SIZE_SLUG} — refusing to scale a different size")
         return None
+    # The kill switch must work even for pods still running with the old env:
+    # honour the value in the LIVE spec, not the one this process booted with.
+    for e in w.get("envs", []):
+        if e.get("key") == "AUTOSCALE" and str(e.get("value", "1")) in ("0", "false", "False", ""):
+            _disable("AUTOSCALE=0 in the live app spec")
+            return None
     return w
 
 
@@ -172,16 +184,21 @@ def on_work_found():
         if time.time() - _last_update < _MIN_GAP_S:
             return
         state = _load_state()
+        if state.get("hold_until_idle"):
+            # The time cap forced us down earlier; stay at 1 until the queue has
+            # drained once (2026-09-21: without this the fleet flapped 1↔8).
+            return
         if _over_time_cap(state):
-            # Something has been scraping for too long; shrink and stay shrunk
-            # until the fleet has been back at 1 (a fresh scale-out resets the clock).
             if current_instances(max_age_s=0) > 1:
-                logger.warning(f"Autoscale: scaled out > {MAX_SCALED_OUT_MINUTES} min — forcing back to 1")
+                logger.warning(f"Autoscale: scaled out > {MAX_SCALED_OUT_MINUTES} min — forcing back to 1 and holding until idle")
                 if _set_instances(1):
                     state["scaled_out_at"] = None
+                    state["hold_until_idle"] = True
                     _save_state(state)
             return
-        n = current_instances()
+        n = current_instances(max_age_s=0)
+        if _deploy_in_progress:
+            return  # never stack spec updates on a running deployment
         if n >= PARALLEL_INSTANCES:
             return
         if _scale_outs_last_24h(state) >= MAX_SCALE_OUTS_PER_DAY:
@@ -209,9 +226,19 @@ def on_idle():
     if now - _idle_since < SCALE_IN_AFTER_IDLE_S or now - _last_update < _MIN_GAP_S:
         return
     try:
-        if current_instances(max_age_s=0) > 1:
+        n = current_instances(max_age_s=0)
+        if n > 1:
+            if _deploy_in_progress:
+                return
             if _set_instances(1):
                 state = _load_state()
+                state["scaled_out_at"] = None
+                state["hold_until_idle"] = False
+                _save_state(state)
+        else:
+            state = _load_state()
+            if state.get("hold_until_idle") or state.get("scaled_out_at"):
+                state["hold_until_idle"] = False
                 state["scaled_out_at"] = None
                 _save_state(state)
     except Exception as e:
@@ -229,6 +256,7 @@ def watchdog():
                 logger.warning(f"Autoscale watchdog: > {MAX_SCALED_OUT_MINUTES} min scaled out — forcing back to 1")
                 if _set_instances(1):
                     state["scaled_out_at"] = None
+                    state["hold_until_idle"] = True
                     _save_state(state)
     except Exception as e:
         logger.warning(f"Autoscale watchdog failed: {e}")
