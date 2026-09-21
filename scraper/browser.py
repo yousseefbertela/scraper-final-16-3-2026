@@ -94,7 +94,12 @@ def _maybe_refresh_proxies():
             f"Webshare proxy list unavailable ({e}); using {len(_PROXY_SERVERS)} "
             f"{'previously loaded' if _proxies_loaded_at else 'static PROXY_SERVERS'} proxies"
         )
-_proxy_cursor = 0
+# Start each worker instance at a different point in the list so a fleet
+# scraping one car does not pile onto the same first exit.
+import socket as _socket
+import zlib as _zlib
+_INSTANCE_SEED = _zlib.crc32((os.environ.get("HOSTNAME") or _socket.gethostname() or "").encode())
+_proxy_cursor = _INSTANCE_SEED
 _current_proxy = None
 # Not every exit passes Cloudflare (2026-09-20: Webshare exit #1 fine, #2 challenged
 # on every request). Remember blocked ones and skip them for a cooldown.

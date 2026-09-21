@@ -1,5 +1,6 @@
 
 import re, logging
+from datetime import datetime
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from scraper.browser import safe_goto, human_delay, human_scroll, BrowserCrashError
@@ -131,6 +132,57 @@ def scrape_parts_table(page, type_code_full, diag_id):
         parts.append(part)
     logger.debug(f"diagId={diag_id}: {len(parts)} parts parsed")
     return parts
+
+def scrape_group(page, car, group, on_subgroup=None):
+    """
+    Scrape ONE main group and return (group_node, parts_count), where group_node
+    is {"group_name", "subgroups": {diagId: {...}}} in the exact shape stored in
+    scraped_files. Used by the parallel worker: each instance takes groups from
+    the shared job table and merges the finished node into the catalog.
+
+    on_subgroup(diag_id) is called after every subgroup (heartbeat hook); if it
+    returns False the group was handed to another instance and we stop.
+    Raises BrowserCrashError so the caller can relaunch the browser.
+    """
+    type_code = car["type_code_full"]
+    mg = group["mg"]
+    node = {"group_name": group["name"], "subgroups": {}}
+    parts_total = 0
+    try:
+        subgroups = get_subgroups(page, type_code, mg)
+    except BrowserCrashError:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting subgroups for group {mg}: {e}")
+        subgroups = []
+    for subgroup in subgroups:
+        diag_id = subgroup["diagId"]
+        logger.info("  Subgroup %s: %s", diag_id, subgroup["name"])
+        human_delay(SUBGROUP_DELAY)
+        scrape_error = None
+        try:
+            parts = scrape_parts_table(page, type_code, diag_id)
+            diagram_url = get_diagram_image_url(page, type_code, diag_id)
+        except BrowserCrashError:
+            raise
+        except Exception as e:
+            logger.error(f"  Error scraping subgroup {diag_id}: {e}")
+            parts, diagram_url, scrape_error = [], "", str(e)
+        entry = {
+            "subgroup_name":     subgroup["name"],
+            "diagram_image_url": diagram_url,
+            "scraped_at":        datetime.utcnow().isoformat(),
+            "parts":             parts,
+        }
+        if scrape_error:
+            entry["scrape_error"] = scrape_error
+        node["subgroups"][diag_id] = entry
+        parts_total += len(parts)
+        if on_subgroup is not None and on_subgroup(diag_id) is False:
+            logger.warning(f"Group {mg} was reassigned to another instance; abandoning it")
+            return None, 0
+    return node, parts_total
+
 
 def scrape_car_parts(page, car, notes_writer, checkpoint_manager):
     """
