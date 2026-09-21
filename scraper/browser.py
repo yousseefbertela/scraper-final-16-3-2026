@@ -24,9 +24,76 @@ _virtual_display = None
 # IPs (seen on DigitalOcean from 2026-09-05) while the same browser passes from
 # a residential/proxy IP. PROXY_SERVERS is a comma-separated host:port list;
 # each browser launch rotates to the next one. Unset = direct, as before.
+# PROXY_SERVERS/PROXY_USERNAME/PROXY_PASSWORD are the static fallback. With
+# WEBSHARE_API_KEY set, the list is pulled from the Webshare account instead
+# (every proxy on the plan, with its own credentials) and refreshed periodically,
+# so a plan change or a replaced exit needs no redeploy.
 _PROXY_SERVERS = [s.strip() for s in os.environ.get("PROXY_SERVERS", "").split(",") if s.strip()]
 _PROXY_USERNAME = os.environ.get("PROXY_USERNAME") or None
 _PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD") or None
+_WEBSHARE_API_KEY = os.environ.get("WEBSHARE_API_KEY", "")
+# Exits in these countries are tried first (closest to the Frankfurt datacenter
+# and the ones that have passed Cloudflare so far); the rest are kept as spares.
+_PROXY_PREFERRED_COUNTRIES = [
+    c.strip().upper() for c in os.environ.get(
+        "PROXY_PREFERRED_COUNTRIES", "DE,NL,GB,FR,BE,IE,DK,SE,CZ,ES,IT,PT,HU,LV,RO,HR,GR"
+    ).split(",") if c.strip()
+]
+_PROXY_REFRESH_S = int(os.environ.get("PROXY_REFRESH_S", str(6 * 3600)))
+_proxies_loaded_at = 0.0
+
+
+def _load_proxies_from_webshare():
+    """Replace the proxy list with the account's current list. Returns True on success."""
+    global _PROXY_SERVERS, _PROXY_USERNAME, _PROXY_PASSWORD, _proxies_loaded_at
+    if not _WEBSHARE_API_KEY:
+        return False
+    import json
+    import urllib.request
+    results = []
+    for page in range(1, 11):
+        req = urllib.request.Request(
+            f"https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page={page}&page_size=100",
+            headers={"Authorization": f"Token {_WEBSHARE_API_KEY}"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        results.extend(body.get("results") or [])
+        if not body.get("next"):
+            break
+    valid = [p for p in results if p.get("valid") and p.get("proxy_address") and p.get("port")]
+    if not valid:
+        raise RuntimeError("Webshare returned no valid proxies")
+
+    def rank(p):
+        c = str(p.get("country_code") or "").upper()
+        return _PROXY_PREFERRED_COUNTRIES.index(c) if c in _PROXY_PREFERRED_COUNTRIES else 999
+
+    valid.sort(key=rank)
+    _PROXY_SERVERS = [f"{p['proxy_address']}:{p['port']}" for p in valid]
+    _PROXY_USERNAME = valid[0].get("username") or _PROXY_USERNAME
+    _PROXY_PASSWORD = valid[0].get("password") or _PROXY_PASSWORD
+    _proxies_loaded_at = time.time()
+    preferred = sum(1 for p in valid if rank(p) != 999)
+    logger.info(
+        f"Loaded {len(valid)} proxies from Webshare ({preferred} in preferred countries; "
+        f"first {_PROXY_SERVERS[0]} {valid[0].get('country_code')})"
+    )
+    return True
+
+
+def _maybe_refresh_proxies():
+    if not _WEBSHARE_API_KEY:
+        return
+    if _proxies_loaded_at and time.time() - _proxies_loaded_at < _PROXY_REFRESH_S:
+        return
+    try:
+        _load_proxies_from_webshare()
+    except Exception as e:
+        logger.warning(
+            f"Webshare proxy list unavailable ({e}); using {len(_PROXY_SERVERS)} "
+            f"{'previously loaded' if _proxies_loaded_at else 'static PROXY_SERVERS'} proxies"
+        )
 _proxy_cursor = 0
 _current_proxy = None
 # Not every exit passes Cloudflare (2026-09-20: Webshare exit #1 fine, #2 challenged
@@ -37,6 +104,7 @@ _blocked_proxies: dict = {}   # server -> time.time() when last blocked
 
 def _next_proxy():
     global _proxy_cursor, _current_proxy
+    _maybe_refresh_proxies()
     if not _PROXY_SERVERS:
         _current_proxy = None
         return None
